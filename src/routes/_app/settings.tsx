@@ -12,6 +12,7 @@ import { api } from '#/lib/api'
 import { qk, useSettings } from '#/lib/queries'
 import { PageHeader } from '#/components/shared/page-header'
 import { ConfirmDialog } from '#/components/shared/confirm-dialog'
+import { SwitchField } from '#/components/shared/switch-field'
 import { useThemeMode } from '#/components/theme-toggle'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -108,6 +109,15 @@ function SettingsPage() {
   })
 
   const [exporting, setExporting] = useState(false)
+
+  // 通知:全局总开关(未设置视为开启)与各类操作通知,取值立即保存。
+  const telegramConfigHint =
+    settings.data?.['telegramConfiguration'] === 'invalid'
+      ? '推送服务配置无效,请检查环境变量 SUKI_SUB_PUSH_SERVICE 的格式'
+      : settings.data?.['telegramConfiguration'] === 'configured'
+        ? undefined
+        : '推送服务未配置:需要在 Worker 环境变量 SUKI_SUB_PUSH_SERVICE 中填写 telegram://机器人Token@telegram?chats=会话ID'
+  const telegramMaster = settings.data?.['telegramEnabled'] !== false
   const exportAll = async () => {
     setExporting(true)
     try {
@@ -237,6 +247,61 @@ function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+        </Section>
+
+        <Section title="通知">
+          <div className="grid gap-2">
+            {telegramConfigHint && (
+              <p className="text-sm text-muted-foreground">
+                {telegramConfigHint}
+              </p>
+            )}
+            <SwitchField
+              label="Telegram 通知总开关"
+              id="tg-master"
+              checked={telegramMaster}
+              disabled={saveSettings.isPending}
+              onCheckedChange={(checked) =>
+                saveSettings.mutate({ telegramEnabled: checked })
+              }
+            />
+            <SwitchField
+              label="分享操作通知"
+              id="tg-share-ops"
+              checked={settings.data?.['telegramNotifyShareOps'] === true}
+              disabled={!telegramMaster || saveSettings.isPending}
+              onCheckedChange={(checked) =>
+                saveSettings.mutate({ telegramNotifyShareOps: checked })
+              }
+            />
+            <SwitchField
+              label="订阅与脚本变更通知"
+              id="tg-resource-ops"
+              checked={settings.data?.['telegramNotifyResourceOps'] === true}
+              disabled={!telegramMaster || saveSettings.isPending}
+              onCheckedChange={(checked) =>
+                saveSettings.mutate({ telegramNotifyResourceOps: checked })
+              }
+            />
+            <SwitchField
+              label="设置与备份通知"
+              id="tg-settings-ops"
+              checked={settings.data?.['telegramNotifySettingsOps'] === true}
+              disabled={!telegramMaster || saveSettings.isPending}
+              onCheckedChange={(checked) =>
+                saveSettings.mutate({ telegramNotifySettingsOps: checked })
+              }
+            />
+            <SwitchField
+              label="接口异常通知"
+              id="tg-system-errors"
+              checked={settings.data?.['telegramNotifySystemErrors'] === true}
+              disabled={!telegramMaster || saveSettings.isPending}
+              onCheckedChange={(checked) =>
+                saveSettings.mutate({ telegramNotifySystemErrors: checked })
+              }
+            />
           </div>
         </Section>
 

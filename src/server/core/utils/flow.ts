@@ -8,12 +8,13 @@ import { hex_md5 } from '#/server/core/vendor/md5'
 import $ from '#/server/core/app'
 import headersResourceCache from '#/server/core/utils/headers-resource-cache'
 import { runBackendRequestTask } from '#/server/core/utils/request-concurrency'
+import { proxyHttpRequest } from './proxy-fetch'
 
 // 返回 { headers, body, statusCode }(headers 为小写键)
 async function httpRequest(
   method: 'GET' | 'HEAD',
   url: string,
-  options: { headers?: any; timeout?: any },
+  options: { headers?: any; timeout?: any; proxy?: any },
 ): Promise<{
   headers: Record<string, string>
   body: string
@@ -23,6 +24,17 @@ async function httpRequest(
   const requestHeaders = new Headers(options.headers)
   if (!requestHeaders.has('accept')) requestHeaders.set('accept', '*/*')
   try {
+    if (options.proxy) {
+      const flat: Record<string, string> = {}
+      requestHeaders.forEach((value, key) => {
+        flat[key] = value
+      })
+      return await proxyHttpRequest(method, url, {
+        headers: flat,
+        timeout,
+        proxy: options.proxy,
+      })
+    }
     const res = await fetch(url, {
       method,
       headers: requestHeaders,
@@ -89,9 +101,6 @@ export async function getFlowHeaders(
     defaultTimeout,
   } = ($.read(SETTINGS_KEY) || {}) as any
   const proxy = customProxy || defaultProxy
-  if (proxy) {
-    $.info('当前环境不支持代理，已忽略代理设置')
-  }
   const userAgent =
     String(
       ua || defaultFlowUserAgent || defaultUserAgent || 'clash.meta/v1.19.23',
@@ -145,6 +154,7 @@ export async function getFlowHeaders(
           httpRequest('GET', url, {
             headers: customHeaders || { 'User-Agent': userAgent },
             timeout: requestTimeout,
+            proxy,
           }),
         'flow body GET',
       )
@@ -194,6 +204,7 @@ export async function getFlowHeaders(
                   'User-Agent': userAgent,
                 },
                 timeout: requestTimeout,
+                proxy,
               },
             ),
           'flow headers HEAD',
@@ -238,6 +249,7 @@ export async function getFlowHeaders(
                   'User-Agent': userAgent,
                 },
                 timeout: requestTimeout,
+                proxy,
               },
             ),
           'flow headers GET',

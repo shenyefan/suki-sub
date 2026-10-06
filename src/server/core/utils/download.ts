@@ -26,6 +26,7 @@ import {
   maskAgeSecretInUrl,
 } from '#/server/core/utils/age'
 import { getEngineStore } from '#/server/store/engine-store'
+import { proxyHttpRequest } from './proxy-fetch'
 
 const clashPreprocessor = PROXY_PREPROCESSORS.find(
   (processor: any) => processor.name === 'Clash Pre-processor',
@@ -35,7 +36,7 @@ const clashPreprocessor = PROXY_PREPROCESSORS.find(
 async function httpRequest(
   method: 'GET' | 'HEAD',
   url: string,
-  options: { headers?: any; timeout?: any },
+  options: { headers?: any; timeout?: any; proxy?: any },
 ): Promise<{
   headers: Record<string, string>
   body: string
@@ -45,6 +46,17 @@ async function httpRequest(
   // Match Suki Sub's Node transport without overriding custom Accept headers.
   const requestHeaders = new Headers(options.headers)
   if (!requestHeaders.has('accept')) requestHeaders.set('accept', '*/*')
+  if (options.proxy) {
+    const flat: Record<string, string> = {}
+    requestHeaders.forEach((value, key) => {
+      flat[key] = value
+    })
+    return proxyHttpRequest(method, url, {
+      headers: flat,
+      timeout,
+      proxy: options.proxy,
+    })
+  }
   const res = await fetch(url, {
     method,
     headers: requestHeaders,
@@ -213,11 +225,8 @@ export default async function download(
   } = ($.read(SETTINGS_KEY) || {}) as any
   const cacheThreshold = defaultCacheThreshold || 1024
   const proxy = customProxy || defaultProxy
-  if (proxy) {
-    console.warn(
-      `[suki-sub] proxy is not supported on Cloudflare Workers, ignoring proxy: ${proxy}`,
-    )
-  }
+  if (proxy)
+    $.debug(`本次下载经由拉取代理: ${maskAgeSecretInUrl(String(proxy))}`)
   const userAgent =
     String(ua || defaultUserAgent || 'clash.meta/v1.19.23').trim() ||
     'clash.meta/v1.19.23'
@@ -388,6 +397,7 @@ export default async function download(
               'User-Agent': userAgent,
             },
             timeout: requestTimeout,
+            proxy,
           }),
         'download',
       )

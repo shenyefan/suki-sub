@@ -2,8 +2,15 @@ import { BaseError, errorMessage } from '../core/errors'
 import { writeServerEvent } from '../store/logs'
 import { redactDiagnostic } from '../core/utils/diagnostics'
 import { LOG_ACTION_LABELS } from '#/shared/logs'
+import { getAllSettings } from '../store/d1'
 import type { ServerLog } from '../store/logs'
-import type { Settings } from '#/shared/types'
+import type { Settings, Subscription, Collection } from '#/shared/types'
+
+/** 通知开关:资源级(订阅/组合)与全局设置共用同一组键。 */
+interface TelegramSwitches {
+  telegramEnabled?: boolean
+  telegramNotifySuccess?: boolean
+}
 
 interface TelegramTarget {
   chatId: string
@@ -163,7 +170,8 @@ export function formatTelegramEvent(entry: ServerLog): string {
   if (Number.isFinite(status) && status > 0) field('状态', `HTTP ${status}`)
   const durationMs = Number(details.durationMs)
   if (Number.isFinite(durationMs) && durationMs >= 0)
-    field('耗时', formatDuration(durationMs))
+    // formatDuration 的 toFixed 会产生小数点,MarkdownV2 中必须转义。
+    field('耗时', escapeMarkdown(formatDuration(durationMs), 24))
   if (problems.length) field('来源失败', `${problems.length} 个`)
   const diagnostic = [
     details.reason ? escapeMarkdown(details.reason, 800) : '',
@@ -203,7 +211,7 @@ export function formatTelegramEvent(entry: ServerLog): string {
 export async function sendTelegramEvents(
   env: Pick<Env, 'SUKI_SUB_PUSH_SERVICE'>,
   entries: readonly ServerLog[],
-  settings: Settings,
+  settings: TelegramSwitches,
   fetcher: typeof fetch = fetch,
 ): Promise<number> {
   if (settings.telegramEnabled !== true) return 0
@@ -321,19 +329,72 @@ export async function sendTelegramEvents(
   return sent
 }
 
+/** 操作类通知的分类:action 前缀 → 对应的全局设置键。 */
+const OP_NOTIFY_SETTINGS = {
+  shares: 'telegramNotifyShareOps',
+  resources: 'telegramNotifyResourceOps',
+  settings: 'telegramNotifySettingsOps',
+} as const
+
+function classifyOpAction(
+  action: string,
+): keyof typeof OP_NOTIFY_SETTINGS | null {
+  if (action.startsWith('share.')) return 'shares'
+  if (
+    action.startsWith('sub.') ||
+    action.startsWith('collection.') ||
+    action.startsWith('module.')
+  )
+    return 'resources'
+  if (
+    action.startsWith('settings.') ||
+    action.startsWith('backup.') ||
+    action.startsWith('session.')
+  )
+    return 'settings'
+  return null
+}
+
 export async function notifyServerEvents(
   env: Env,
   entries: readonly ServerLog[],
-  resource?: Settings,
+  resource?: Subscription | Collection,
 ): Promise<void> {
-  if (
-    !env.SUKI_SUB_PUSH_SERVICE ||
-    !entries.length ||
-    resource?.telegramEnabled !== true
-  )
-    return
+  if (!env.SUKI_SUB_PUSH_SERVICE || !entries.length) return
+  let globalSettings: Settings = {}
   try {
-    await sendTelegramEvents(env, entries, resource)
+    globalSettings = await getAllSettings(env.SUKI_SUB_DB)
+  } catch {
+    // 设置表读取失败时退回资源级开关发送,通知不依赖设置表可用。
+  }
+  // 全局总开关:显式关闭时全部静默(未设置视为开启,保持既有行为)。
+  if (globalSettings.telegramEnabled === false) return
+  // 操作类请求(创建分享、增删改、设置/备份)按各自分类开关,成功与失败都推送;
+  // 其余带资源上下文的请求(订阅拉取/预览)按资源级开关;都不匹配时仅接口异常兜底。
+  let opCategory: keyof typeof OP_NOTIFY_SETTINGS | null = null
+  for (const entry of entries) {
+    const action = String(entry.details?.action ?? '')
+    opCategory = classifyOpAction(action)
+    if (opCategory) break
+  }
+  const switches: TelegramSwitches = opCategory
+    ? {
+        telegramEnabled:
+          globalSettings[OP_NOTIFY_SETTINGS[opCategory]] === true,
+        telegramNotifySuccess: true,
+      }
+    : resource
+      ? {
+          telegramEnabled: resource.telegramEnabled === true,
+          telegramNotifySuccess: resource.telegramNotifySuccess === true,
+        }
+      : {
+          telegramEnabled: globalSettings.telegramNotifySystemErrors === true,
+          telegramNotifySuccess: false,
+        }
+  if (switches.telegramEnabled !== true) return
+  try {
+    await sendTelegramEvents(env, entries, switches)
   } catch (error) {
     writeServerEvent('warn', 'Telegram 通知发送失败', {
       action: 'notification.telegram',

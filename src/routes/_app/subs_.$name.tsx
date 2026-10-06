@@ -403,7 +403,7 @@ function SubEditorPage() {
                     <Input
                       id="sub-proxy"
                       value={form.proxy ?? ''}
-                      placeholder="http://…"
+                      placeholder="http://… / https://… / socks5://…"
                       onChange={(e) => patch({ proxy: e.target.value })}
                     />
                   </Field>
