@@ -1,0 +1,16 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+.env
+.dev.vars
+.tanstack/dev-oidc
+.nitro
+.tanstack
+.wrangler
+.output
+.vinxi
+__unconfig*
+/.claude/
+/.idea/

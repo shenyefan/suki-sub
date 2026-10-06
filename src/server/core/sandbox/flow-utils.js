@@ -1,0 +1,248 @@
+// 沙箱内可用的纯流量工具;以 ?raw 内嵌进沙箱,不能 import 项目内模块。
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export function getFlowField(headers) {
+  const keys = Object.keys(headers)
+  let sub = ''
+  let webPage = ''
+  let planName = ''
+  for (let k of keys) {
+    const lower = k.toLowerCase()
+    if (lower === 'subscription-userinfo') {
+      sub = headers[k]
+    } else if (lower === 'profile-web-page-url') {
+      webPage = headers[k]
+    } else if (lower === 'plan-name') {
+      planName = headers[k]
+    }
+  }
+
+  return `${sub || ''}${
+    webPage ? `; app_url=${encodeURIComponent(webPage)}` : ''
+  }${planName ? `; plan_name=${encodeURIComponent(planName)}` : ''}`
+}
+
+export function parseFlowHeaders(flowHeaders) {
+  if (!flowHeaders) return
+  // unit is KB
+  const uploadMatch = flowHeaders.match(
+    /upload=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
+  )
+  const upload =
+    uploadMatch == null ? 0 : Number(uploadMatch[1] + uploadMatch[2])
+
+  const downloadMatch = flowHeaders.match(
+    /download=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
+  )
+  const download = downloadMatch && Number(downloadMatch[1] + downloadMatch[2])
+
+  const totalMatch = flowHeaders.match(
+    /total=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
+  )
+  const total = totalMatch && Number(totalMatch[1] + totalMatch[2])
+
+  const expireMatch = flowHeaders.match(
+    /expire=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
+  )
+  const expires = expireMatch
+    ? Number(expireMatch[1] + expireMatch[2])
+    : undefined
+
+  const remainingDaysMatch = flowHeaders.match(/reset_day=([0-9]+)/)
+  const remainingDays = remainingDaysMatch
+    ? Number(remainingDaysMatch[1])
+    : undefined
+
+  const appUrlMatch = flowHeaders.match(/app_url=(.*?)\s*?(;|$)/)
+  const appUrl = appUrlMatch ? decodeURIComponent(appUrlMatch[1]) : undefined
+
+  const planNameMatch = flowHeaders.match(/plan_name=(.*?)\s*?(;|$)/)
+  const planName = planNameMatch
+    ? decodeURIComponent(planNameMatch[1])
+    : undefined
+
+  return {
+    expires,
+    total,
+    usage: { upload, download },
+    remainingDays,
+    appUrl,
+    planName,
+  }
+}
+
+export function flowTransfer(flow, unit = 'B') {
+  const unitList = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+  let unitIndex = unitList.indexOf(unit)
+
+  return flow < 1024 || unitIndex === unitList.length - 1
+    ? { value: (Math.round(flow * 100) / 100).toString(), unit: unit }
+    : flowTransfer(flow / 1024, unitList[++unitIndex])
+}
+
+export function validCheck(flow) {
+  if (!flow) {
+    throw new Error('没有流量信息')
+  }
+  if (flow?.expires && flow.expires * 1000 < Date.now()) {
+    const date = new Date(flow.expires * 1000).toLocaleDateString()
+    throw new Error(`订阅已过期: ${date}`)
+  }
+  if (flow?.total) {
+    const upload = flow.usage?.upload || 0
+    const download = flow.usage?.download || 0
+    if (flow.total - upload - download <= 0) {
+      const current = upload + download
+      const currT = flowTransfer(Math.abs(current))
+      currT.value = current < 0 ? '-' + currT.value : currT.value
+      const totalT = flowTransfer(flow.total)
+      throw new Error(
+        `流量已用完: ${currT.value} ${currT.unit} / ${totalT.value} ${totalT.unit}`,
+      )
+    }
+  }
+}
+
+export function getRmainingDays(opt = {}) {
+  try {
+    let { resetDay, startDate, cycleDays } = opt
+    if (['string', 'number'].includes(typeof opt)) {
+      resetDay = opt
+    }
+
+    if (startDate && cycleDays) {
+      cycleDays = parseInt(cycleDays)
+      if (isNaN(cycleDays) || cycleDays <= 0)
+        throw new Error('重置周期应为正整数')
+      if (!startDate || !Date.parse(startDate))
+        throw new Error('开始日期不合法')
+
+      const start = new Date(startDate)
+      const today = new Date()
+      start.setHours(0, 0, 0, 0)
+      today.setHours(0, 0, 0, 0)
+      if (start.getTime() > today.getTime())
+        throw new Error('开始日期应早于现在')
+
+      let resetDate = new Date(startDate)
+      resetDate.setDate(resetDate.getDate() + cycleDays)
+
+      while (resetDate < today) {
+        resetDate.setDate(resetDate.getDate() + cycleDays)
+      }
+
+      resetDate.setHours(0, 0, 0, 0)
+      const timeDiff = resetDate.getTime() - today.getTime()
+      const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24))
+
+      return daysDiff
+    } else {
+      if (!resetDay) return
+      resetDay = parseInt(resetDay)
+      if (isNaN(resetDay) || resetDay <= 0 || resetDay > 31)
+        throw new Error('月重置日应为 1-31 之间的整数')
+      let now = new Date()
+      let today = now.getDate()
+      let month = now.getMonth()
+      let year = now.getFullYear()
+      let daysInMonth
+
+      if (resetDay > today) {
+        daysInMonth = 0
+      } else {
+        daysInMonth = new Date(year, month + 1, 0).getDate()
+      }
+
+      return daysInMonth - today + resetDay
+    }
+  } catch (e) {
+    console.error(`getRmainingDays failed: ${e.message ?? e}`)
+  }
+}
+
+export function normalizeFlowHeader(flowHeaders, splitHeaders) {
+  try {
+    // 使用 Map 保持顺序并处理重复键
+    const kvMap = new Map()
+
+    flowHeaders
+      .split(';')
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .forEach((pair) => {
+        const eqIndex = pair.indexOf('=')
+        if (eqIndex === -1) return
+
+        const key = pair.slice(0, eqIndex).trim()
+        const encodedValue = pair.slice(eqIndex + 1).trim()
+
+        // 只保留第一个出现的 key
+        if (!kvMap.has(key)) {
+          try {
+            // 解码 URI 组件并保留原始值作为 fallback
+            let decodedValue = decodeURIComponent(encodedValue)
+            if (
+              ['upload', 'download', 'total', 'expire', 'reset_day'].includes(
+                key,
+              )
+            ) {
+              try {
+                decodedValue = Number(decodedValue)
+                if (
+                  ['expire', 'reset_day'].includes(key) &&
+                  (decodedValue <= 0 || !Number.isFinite(decodedValue))
+                ) {
+                  decodedValue = ''
+                } else if (
+                  ['upload', 'download', 'total'].includes(key) &&
+                  !Number.isFinite(decodedValue) // 有些机场后端会下发负数
+                ) {
+                  decodedValue = 0
+                } else {
+                  decodedValue = decodedValue.toFixed(0)
+                }
+              } catch (e) {
+                console.error(
+                  `Failed to convert value for key "${key}=${encodedValue}": ${
+                    e.message ?? e
+                  }`,
+                )
+              }
+            }
+            kvMap.set(key, decodedValue)
+          } catch (e) {
+            kvMap.set(key, encodedValue)
+          }
+        }
+      })
+    const subscriptionUserinfo = {}
+    const headers = {
+      'subscription-userinfo': '',
+      'profile-web-page-url': '',
+      'plan-name': '',
+    }
+    kvMap.forEach((v, k) => {
+      if (splitHeaders && k === 'app_url') {
+        headers['profile-web-page-url'] = v
+      } else if (splitHeaders && k === 'plan_name') {
+        headers['plan-name'] = v
+      } else {
+        subscriptionUserinfo[k] = v
+      }
+    })
+    if (Object.keys(subscriptionUserinfo).length > 0) {
+      headers['subscription-userinfo'] = Object.entries(subscriptionUserinfo)
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+        .join('; ')
+    }
+    return splitHeaders ? headers : headers['subscription-userinfo']
+  } catch (e) {
+    console.error(`normalizeFlowHeader failed: ${e.message ?? e}`)
+    return splitHeaders
+      ? {
+          'subscription-userinfo': flowHeaders,
+        }
+      : flowHeaders
+  }
+}

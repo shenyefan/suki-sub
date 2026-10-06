@@ -1,0 +1,1261 @@
+import { OPERATOR_LABELS } from '#/features/operators/registry'
+import type { ValidationIssue } from '#/shared/resource-validation'
+import { parseResourceLink } from '#/shared/resource-link'
+import {
+  BaseError,
+  errorMessage,
+  ResourceNotFoundError,
+  NetworkError,
+  RequestInvalidError,
+} from '#/server/core/errors'
+/**
+ * ProxyUtils:parse / process / processResponse / produce 及配套工具。
+ */
+import { Base64 } from 'js-base64'
+import { Buffer } from 'node:buffer'
+import rs from '#/server/core/utils/rs'
+import YAML from '#/server/core/utils/yaml'
+import download from '#/server/core/utils/download'
+import {
+  decryptArmorIfPresent,
+  derivePublicKey,
+  encryptArmor,
+} from '#/server/core/utils/age'
+import {
+  isIPv4,
+  isIPv6,
+  isValidPortNumber,
+  isValidUUID,
+  isNotBlank,
+  ipAddress,
+  getRandomPort,
+  numberToString,
+} from '#/server/core/utils/index'
+import PROXY_PROCESSORS, {
+  ApplyProcessor,
+  ApplyResponseTransformer,
+  isResponseTransformerType,
+} from './processors'
+import PROXY_PREPROCESSORS from './preprocessors'
+import PROXY_PRODUCERS from './producers'
+import PROXY_PARSERS from './parsers'
+import $ from '#/server/core/app'
+import { MODULES_KEY } from '#/server/core/constants'
+import { findByName } from '#/server/core/utils/database'
+import { getFlag, removeFlag, getISO } from '#/server/core/utils/geo'
+import Gist from '#/server/core/utils/gist'
+import {
+  isShadowsocksOverTls,
+  normalizeWireGuardInterface,
+} from './producers/utils'
+import { doh } from '#/server/core/utils/dns'
+import JSON5 from 'json5'
+import { hex_md5 } from '#/server/core/vendor/md5'
+import SurgeMac_Producer from './producers/surgemac'
+import {
+  parseConfigTemplate,
+  supportsConfigTemplate,
+} from '../utils/config-template'
+
+const ageUtils = {
+  encrypt: encryptArmor,
+  decrypt: decryptArmorIfPresent,
+  derivePublicKey,
+}
+
+const isNode: any = false
+const SUKI_SUB_FRONTEND_BACKEND_PATH: any = undefined
+const SUKI_SUB_BACKEND_CUSTOM_NAME: any = undefined
+
+function preprocess(raw: any) {
+  for (const processor of PROXY_PREPROCESSORS as any[]) {
+    try {
+      if (processor.test(raw)) {
+        $.info(`Pre-processor [${processor.name}] activated`)
+        return processor.parse(raw)
+      }
+    } catch (e) {
+      if (e instanceof BaseError) throw e
+      throw new RequestInvalidError(
+        'SUBSCRIPTION_PARSE_FAILED',
+        '订阅内容预处理失败',
+        {
+          parser: processor.name,
+          reason: e instanceof Error ? e.message : String(e),
+        },
+      )
+    }
+  }
+  return raw
+}
+
+function parse(raw: any) {
+  raw = preprocess(raw)
+  // parse
+  const lines = raw.split('\n')
+  const proxies: any[] = []
+  let lastParser: any
+  const invalidLines: number[] = []
+  let lineNumber = 0
+
+  for (let line of lines) {
+    lineNumber++
+    line = line.trim()
+    if (line.length === 0) continue // skip empty line
+    let success = false
+
+    // try to parse with last used parser
+    if (lastParser) {
+      const [proxy, error] = tryParse(lastParser, line)
+      if (!error) {
+        proxies.push(lastParse(proxy))
+        success = true
+      }
+    }
+
+    if (!success) {
+      // search for a new parser
+      for (const parser of PROXY_PARSERS) {
+        const [proxy, error] = tryParse(parser, line)
+        if (!error) {
+          proxies.push(lastParse(proxy))
+          lastParser = parser
+          success = true
+          $.info(`${parser.name} is activated`)
+          break
+        }
+      }
+    }
+
+    if (!success) {
+      invalidLines.push(lineNumber)
+    }
+  }
+  if (invalidLines.length && !proxies.length)
+    throw new RequestInvalidError(
+      'SUBSCRIPTION_PARSE_FAILED',
+      '订阅内容无法解析为节点',
+      { invalidLines },
+    )
+  if (invalidLines.length)
+    $.warn(`跳过 ${invalidLines.length} 行无法解析的节点内容`, { invalidLines })
+  const invalidNodes: { source: string; message: string }[] = []
+  const validProxies = proxies.filter((proxy) => {
+    if (['vless', 'vmess'].includes(proxy.type)) {
+      const isProxyUUIDValid = isValidUUID(proxy.uuid)
+      if (!isProxyUUIDValid) {
+        $.warn(`UUID may be invalid: ${proxy.name} ${proxy.uuid}`)
+      }
+      // return isProxyUUIDValid;
+    } else if (['hysteria2'].includes(proxy.type)) {
+      if (proxy.obfs && !proxy['obfs-password']) {
+        invalidNodes.push({
+          source: proxy.name,
+          message: `缺少 ${proxy.obfs} 混淆密码`,
+        })
+        return false
+      }
+    }
+    return true
+  })
+  if (invalidNodes.length && !validProxies.length)
+    throw new RequestInvalidError(
+      'SUBSCRIPTION_PARSE_FAILED',
+      '订阅中没有有效节点',
+      { failures: invalidNodes },
+    )
+  if (invalidNodes.length)
+    $.warn(`跳过 ${invalidNodes.length} 个无效节点`, { failures: invalidNodes })
+  return validProxies
+}
+
+function shouldSkipByContext(item: any, context: any) {
+  const control = context.process
+  if (!control || typeof control !== 'object') return false
+
+  const { type, customNames } = control
+  if (!Array.isArray(customNames)) return false
+
+  const matched =
+    item.customName != null && customNames.includes(item.customName)
+
+  if (type === 'disable') return matched
+  if (type === 'enable') return !matched
+  return false
+}
+
+function operatorFailure(
+  error: unknown,
+  item: any,
+  index: number,
+  source: any,
+) {
+  const resource: any =
+    Object.values(source || {}).find(
+      (value: any) => value && typeof value === 'object' && value.name,
+    ) || {}
+  const issue: ValidationIssue = {
+    resourceKind: Array.isArray(resource.subscriptions) ? 'collection' : 'sub',
+    resourceName: resource.name || '未命名',
+    field: `process.${index}`,
+    operatorIndex: index,
+    operatorId: item.id,
+    operatorName: item.customName || OPERATOR_LABELS[item.type] || item.type,
+    message: errorMessage(error),
+  }
+  if (error instanceof BaseError) {
+    const { message: _, ...position } = issue
+    Object.assign(error, position)
+    error.resourceDisplayName = resource.displayName?.trim() || resource.name
+    return error
+  }
+  return new RequestInvalidError('OPERATOR_FAILED', issue.message, {
+    resourceDisplayName: resource.displayName?.trim() || resource.name,
+    issues: [issue],
+  })
+}
+
+async function processFn(
+  proxies: any,
+  operators: any[] = [],
+  targetPlatform: any,
+  source: any,
+  $options: any,
+  raw: any,
+  executionContext: any = {},
+) {
+  const context: any = {}
+  if (raw !== undefined) {
+    context.raw =
+      Array.isArray(raw) || (raw !== null && typeof raw === 'object')
+        ? raw
+        : [raw]
+  }
+  for (const [operatorIndex, item] of operators.entries()) {
+    if (isResponseTransformerType(item.type)) {
+      $.log(
+        `Skipping response transformer during proxy processing: "${
+          item.type
+        }" with arguments:\n >>> ${
+          JSON.stringify(item.args, null, 2) || 'None'
+        }`,
+      )
+      continue
+    }
+    if (shouldSkipByContext(item, context)) {
+      $.info(
+        `Skipping context-controlled operator: "${
+          item.type
+        }" with customName "${item.customName || ''}"`,
+      )
+      continue
+    }
+    if (item.disabled) {
+      $.log(
+        `Skipping disabled operator: "${item.type}" with arguments:\n >>> ${
+          JSON.stringify(item.args, null, 2) || 'None'
+        }`,
+      )
+      continue
+    }
+    try {
+      // process script
+      let script: any
+      let $arguments: any = {}
+      if (item.type.indexOf('Script') !== -1) {
+        ;({ script, $arguments } = await loadScriptItem(item, executionContext))
+        if (item.type === 'Script Operator') {
+          const template = parseConfigTemplate(script)
+          if (template) {
+            if (
+              executionContext.produceType !== 'internal' &&
+              !executionContext.validation &&
+              !supportsConfigTemplate(targetPlatform)
+            ) {
+              if (executionContext.ignoreIncompatibleOperations === true)
+                continue
+              throw new RequestInvalidError(
+                'CONFIG_TARGET_UNSUPPORTED',
+                '配置模板需要使用 Clash、Mihomo 或 Stash 格式下载',
+                { platform: targetPlatform },
+              )
+            }
+            executionContext.configTemplates ??= []
+            executionContext.configTemplates.push(template)
+            continue
+          }
+        }
+      }
+
+      const itemProcessor = PROXY_PROCESSORS[item.type]
+      if (!itemProcessor) {
+        throw new RequestInvalidError('INVALID_OPERATOR', '不支持此操作类型')
+      }
+
+      $.log(
+        `Applying "${item.type}" with arguments:\n >>> ${
+          JSON.stringify(item.args, null, 2) || 'None'
+        }`,
+      )
+      let processor: any
+      if (item.type.indexOf('Script') !== -1) {
+        processor = itemProcessor(
+          script,
+          targetPlatform,
+          $arguments,
+          source,
+          $options,
+          context,
+        )
+      } else {
+        processor = itemProcessor(item.args || {}, executionContext)
+      }
+      proxies = await ApplyProcessor(processor, proxies)
+      if (executionContext.validation) {
+        if (!Array.isArray(proxies)) throw new Error('操作结果必须是节点数组')
+        if (!proxies.length)
+          throw new Error('此操作处理后没有可用节点，请检查筛选条件')
+      }
+    } catch (error) {
+      throw operatorFailure(error, item, operatorIndex, source)
+    }
+  }
+  return proxies
+}
+
+async function processResponseFn(
+  response: any,
+  operators: any[] = [],
+  targetPlatform: any,
+  source: any,
+  $options: any,
+  executionContext: any = {},
+) {
+  const context: any = {}
+  let output = normalizeResponse(response)
+  for (const [operatorIndex, item] of operators.entries()) {
+    if (!isResponseTransformerType(item.type)) continue
+    if (shouldSkipByContext(item, context)) {
+      $.info(
+        `Skipping context-controlled response transformer: "${
+          item.type
+        }" with customName "${item.customName || ''}"`,
+      )
+      continue
+    }
+    if (item.disabled) {
+      $.log(
+        `Skipping disabled response transformer: "${
+          item.type
+        }" with arguments:\n >>> ${
+          JSON.stringify(item.args, null, 2) || 'None'
+        }`,
+      )
+      continue
+    }
+
+    try {
+      const { script, $arguments } = await loadScriptItem(
+        item,
+        executionContext,
+      )
+      $.log(
+        `Applying "${item.type}" with arguments:\n >>> ${
+          JSON.stringify(item.args, null, 2) || 'None'
+        }`,
+      )
+      // isResponseTransformerType 已白名单化 item.type,此处必然命中
+      const transformerFn = PROXY_PROCESSORS[item.type]
+      if (!transformerFn) continue
+      const transformer = transformerFn(
+        script,
+        targetPlatform,
+        $arguments,
+        source,
+        $options,
+        context,
+      )
+      output = normalizeResponse(
+        await ApplyResponseTransformer(transformer, output),
+      )
+    } catch (error) {
+      throw operatorFailure(error, item, operatorIndex, source)
+    }
+  }
+  return output
+}
+
+async function loadScriptItem(
+  item: any,
+  executionContext: any = {},
+): Promise<{ script: any; $arguments: any }> {
+  if (
+    isNode &&
+    !SUKI_SUB_FRONTEND_BACKEND_PATH?.startsWith('/') &&
+    !SUKI_SUB_BACKEND_CUSTOM_NAME
+  ) {
+    const message =
+      'Node.js 环境下，脚本操作、脚本过滤和修改响应必须设置 SUKI_SUB_FRONTEND_BACKEND_PATH 才能生效；若不想改变当前 path，可设置 SUKI_SUB_FRONTEND_BACKEND_PATH=/'
+    throw new RequestInvalidError('SCRIPT_NOT_CONFIGURED', message)
+  }
+
+  let script: any
+  let $arguments: any = {}
+  const { mode, content } = item.args || {}
+  if (mode === 'link') {
+    const parsedLink = parseResourceLink(content || '')
+    $arguments = parsedLink.arguments
+    const networkOptions = Object.fromEntries(
+      ['noCache', 'insecure', 'noFlow']
+        .filter((key) => parsedLink.arguments[key] === true)
+        .map((key) => [key, true]),
+    )
+    if (executionContext.validation) networkOptions.noCache = true
+    const url = `${parsedLink.url}${Object.keys(networkOptions).length ? `#${encodeURIComponent(JSON.stringify(networkOptions))}` : ''}`
+    const downloadUrlMatch = url.split('#')[0].match(/^\/api\/(modules)\/(.+)/)
+    if (downloadUrlMatch) {
+      const name = decodeURIComponent(downloadUrlMatch[2])
+      const localItem = findByName($.read(MODULES_KEY) as any[], name)
+      if (!localItem)
+        throw new ResourceNotFoundError('MODULE_NOT_FOUND', '脚本模块不存在', {
+          module: name,
+        })
+      script = localItem.content
+    } else {
+      // if this is a remote script, download it
+      try {
+        script = await download(
+          url,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { noFlow: executionContext.noFlow },
+        )
+        // $.info(`Script loaded: >>>\n ${script}`);
+      } catch (err) {
+        if (err instanceof BaseError) throw err
+        throw new NetworkError('SCRIPT_DOWNLOAD_FAILED', '远程脚本下载失败')
+      }
+    }
+  } else {
+    script = content
+    $arguments = item.args?.arguments || {}
+  }
+  return { script, $arguments }
+}
+
+function normalizeResponse(response: any = {}): any {
+  let headers = response.header || response.headers || {}
+  if (!headers || typeof headers !== 'object') headers = {}
+  const normalized = {
+    status: response.status || response.statusCode || 200,
+    body: Object.prototype.hasOwnProperty.call(response, 'body')
+      ? response.body
+      : '',
+  }
+  Object.defineProperty(normalized, 'headers', {
+    enumerable: true,
+    get() {
+      return headers
+    },
+    set(value) {
+      headers = value && typeof value === 'object' ? value : {}
+    },
+  })
+  Object.defineProperty(normalized, 'header', {
+    enumerable: true,
+    get() {
+      return headers
+    },
+    set(value) {
+      headers = value && typeof value === 'object' ? value : {}
+    },
+  })
+  return normalized
+}
+
+function produce(
+  proxies: any,
+  targetPlatform: string,
+  type: any,
+  opts: any = {},
+) {
+  const producer: any = (PROXY_PRODUCERS as any)[targetPlatform]
+  if (!producer) {
+    throw new Error(`Target platform: ${targetPlatform} is not supported!`)
+  }
+
+  const normalizedTarget = String(targetPlatform).toLowerCase()
+
+  const inputCount = proxies.length
+  const failures: { source: string; message: string }[] = []
+  const report = (proxy: any, message: string) =>
+    failures.push({
+      source: proxy.name || `${proxy.server}:${proxy.port}`,
+      message,
+    })
+  const checkOutput = (count: number) => {
+    if (inputCount && !count)
+      throw new RequestInvalidError(
+        'NODE_EXPORT_FAILED',
+        `没有可导出到 ${targetPlatform} 的节点`,
+        { platform: targetPlatform, failures },
+      )
+    if (failures.length)
+      $.warn(`跳过 ${failures.length} 个无法导出的节点`, {
+        platform: targetPlatform,
+        failures,
+      })
+  }
+
+  // filter unsupported proxies
+  proxies = proxies.filter((proxy: any) => {
+    const includeUnsupportedProxy = opts['include-unsupported-proxy']
+
+    // 检查代理是否支持目标平台
+    if (
+      !includeUnsupportedProxy &&
+      proxy.supported &&
+      proxy.supported[targetPlatform] === false
+    ) {
+      report(proxy, `节点不支持 ${targetPlatform}`)
+      return false
+    }
+
+    if (
+      !includeUnsupportedProxy &&
+      hasRootProxyHeaders(proxy) &&
+      isRootHeaderSensitiveProxy(proxy) &&
+      !supportsRootProxyHeaders(proxy, targetPlatform)
+    ) {
+      report(
+        proxy,
+        `Target platform ${targetPlatform} does not support headers for ${getRootHeaderProxyLabel(
+          proxy,
+        )} proxy ${
+          proxy.name || `${proxy.server}:${proxy.port}`
+        }. Proxy has been filtered.`,
+      )
+      return false
+    }
+
+    if (
+      !includeUnsupportedProxy &&
+      isShadowsocksOverTls(proxy) &&
+      !['qx', 'quantumultx', 'shadowrocket'].includes(normalizedTarget)
+    ) {
+      report(proxy, `节点不支持 ${targetPlatform} 的 Shadowsocks over TLS`)
+      return false
+    }
+
+    // 对于 vless 和 vmess 代理,需要额外验证 UUID
+    if (['vless', 'vmess'].includes(proxy.type)) {
+      const isProxyUUIDValid = isValidUUID(proxy.uuid)
+      if (!isProxyUUIDValid)
+        $.warn(`UUID may be invalid: ${proxy.name} ${proxy.uuid}`)
+      // return isProxyUUIDValid;
+      const isVlessType = proxy.type === 'vless'
+      const realityChecks = isVlessType
+        ? [
+            ['reality-opts', proxy['reality-opts']],
+            [
+              'xhttp download-settings reality-opts',
+              proxy['xhttp-opts']?.['download-settings']?.['reality-opts'],
+            ],
+          ]
+        : []
+      for (const [realityLabel, realityOpts] of realityChecks) {
+        if (realityOpts && !isNotBlank(realityOpts['public-key'])) {
+          // When the main proxy (上行) uses Reality with a valid
+          // public-key, an explicit empty-string public-key in xhttp
+          // download-settings reality-opts (下行) is intentional:
+          // it explicitly cancels Reality inheritance for the
+          // download stream. This is a legitimate Mihomo config.
+          // Distinguish from reality-opts:{} (missing public-key
+          // entirely) which represents a broken/incomplete Reality
+          // config parsed from a malformed URI and should still be
+          // rejected.
+          if (
+            realityLabel === 'xhttp download-settings reality-opts' &&
+            isNotBlank(proxy['reality-opts']?.['public-key']) &&
+            realityOpts['public-key'] === ''
+          ) {
+            continue
+          }
+          // Intentional: a VLESS Reality node without public-key is
+          // not a valid Mihomo export or regenerated share link. We
+          // keep the marker while parsing so callers can inspect the
+          // broken config, then stop export here instead of silently
+          // emitting invalid Reality output.
+          report(
+            proxy,
+            `Skipping VLESS Reality proxy ${proxy.name}: empty ${realityLabel}.public-key`,
+          )
+          return false
+        }
+      }
+
+      const xhttpOpts = proxy['xhttp-opts']
+      if (
+        isVlessType &&
+        proxy.network === 'xhttp' &&
+        xhttpOpts?.mode === 'stream-one' &&
+        xhttpOpts['download-settings']
+      ) {
+        // Match Mihomo's outbound validation: xhttp download-settings
+        // require split transports, so stream-one is rejected instead
+        // of emitting a config/share link that Mihomo will not accept.
+        report(
+          proxy,
+          `Skipping VLESS xhttp proxy ${proxy.name}: mode "stream-one" cannot be used with download-settings`,
+        )
+        return false
+      }
+    }
+
+    return true
+  })
+
+  proxies = proxies.map((proxy: any) => {
+    proxy._resolved = proxy.resolved
+
+    if (!isNotBlank(proxy.name)) {
+      proxy.name = `${proxy.type} ${proxy.server}:${proxy.port}`
+    }
+    if (proxy['disable-sni']) {
+      if (['surge', 'surgemac', 'shadowrocket'].includes(normalizedTarget)) {
+        proxy.sni = 'off'
+      } else if (
+        !['tuic'].includes(proxy.type) &&
+        !['sing-box', 'singbox'].includes(normalizedTarget)
+      ) {
+        // 目前 Suki Sub 里 sing-box 是靠 mihomo 转一次的. 会用到 disable-sni 转成 disable_sni. 是支持的
+        // 其他客户端行为可能不一致. mihomo 可设置为 ip, 此时会不发 sni
+        $.warn(
+          `Target platform ${targetPlatform} does not support sni off. As a workaround for mihomo, proxy ${proxy.name} sni will be set to IP instead`,
+        )
+        proxy.sni = isIP(proxy.server) ? proxy.server : '127.0.0.1'
+        // proxy['skip-cert-verify'] = true;
+        // delete proxy['tls-fingerprint'];
+      }
+    }
+
+    // 处理 端口跳跃
+    if (proxy.ports) {
+      proxy.ports = String(proxy.ports)
+      if (
+        !['meta', 'clashmeta', 'clash.meta', 'mihomo'].includes(
+          normalizedTarget,
+        )
+      ) {
+        proxy.ports = proxy.ports.replace(/\//g, ',')
+      }
+      if (!proxy.port) {
+        proxy.port = getRandomPort(proxy.ports)
+      }
+    }
+    if (proxy.type === 'wireguard') {
+      normalizeWireGuardInterface(proxy)
+    }
+
+    return proxy
+  })
+
+  $.log(`Producing proxies for target: ${targetPlatform}`)
+  if (typeof producer.type === 'undefined' || producer.type === 'SINGLE') {
+    let list: any = proxies
+      .map((proxy: any) => {
+        try {
+          return producer.produce(proxy, type, opts)
+        } catch (err) {
+          report(proxy, errorMessage(err))
+          return ''
+        }
+      })
+      .filter((line: any) => line.length > 0)
+    if (opts._merged && opts.localPort >= 1) {
+      list.push(
+        SurgeMac_Producer().produce(
+          {
+            name: opts._merged.name,
+            type: 'external',
+            udp: true,
+            exec: opts._merged.exec,
+            'local-port': opts.localPort,
+            args: [
+              '-config',
+              Base64.encode(
+                JSON.stringify({
+                  ...opts._merged.config,
+                  ...(opts._merged.configOverride || {}),
+                  'mixed-port': opts.localPort,
+                }),
+              ),
+            ],
+            addresses: [],
+          },
+          type,
+          opts,
+        ),
+      )
+    }
+    checkOutput(list.length)
+    list = type === 'internal' ? list : list.join('\n')
+    if (
+      targetPlatform.startsWith('Surge') &&
+      proxies.length > 0 &&
+      proxies.every((p: any) => p.type === 'wireguard')
+    ) {
+      list = `#!name=${proxies[0]?._subName}
+#!desc=${proxies[0]?._desc ?? ''}
+#!category=${proxies[0]?._category ?? ''}
+${list}`
+    }
+    return list
+  } else if (producer.type === 'ALL') {
+    checkOutput(proxies.length)
+    return producer.produce(proxies, type, opts)
+  }
+}
+
+function hasRootProxyHeaders(proxy: any) {
+  return (
+    proxy?.headers &&
+    typeof proxy.headers === 'object' &&
+    Object.keys(proxy.headers).length > 0
+  )
+}
+
+function isRootHeaderSensitiveProxy(proxy: any) {
+  return ['http', 'h2-connect', 'trusttunnel'].includes(proxy?.type)
+}
+
+function supportsRootProxyHeaders(proxy: any, targetPlatform: string) {
+  const normalizedTarget = `${targetPlatform}`.toLowerCase()
+
+  if (normalizedTarget.startsWith('surge')) {
+    return ['http', 'h2-connect', 'trusttunnel'].includes(proxy.type)
+  }
+
+  if (normalizedTarget === 'egern') {
+    return proxy.type === 'http'
+  }
+
+  if (
+    ['clashmeta', 'clash.meta', 'meta', 'mihomo'].includes(normalizedTarget)
+  ) {
+    return proxy.type === 'http'
+  }
+
+  if (['singbox', 'sing-box'].includes(normalizedTarget)) {
+    return proxy.type === 'http'
+  }
+
+  if (normalizedTarget === 'json') {
+    return ['http', 'h2-connect', 'trusttunnel'].includes(proxy.type)
+  }
+
+  return false
+}
+
+function getRootHeaderProxyLabel(proxy: any) {
+  if (proxy.type === 'http') {
+    return proxy.tls ? 'HTTPS' : 'HTTP'
+  }
+
+  if (proxy.type === 'h2-connect') {
+    return 'HTTP/2 CONNECT'
+  }
+
+  if (proxy.type === 'trusttunnel') {
+    return 'TrustTunnel'
+  }
+
+  return proxy.type
+}
+
+export const ProxyUtils: any = {
+  parse,
+  process: processFn,
+  processResponse: processResponseFn,
+  produce,
+  age: ageUtils,
+  ipAddress,
+  getRandomPort,
+  isIPv4,
+  isIPv6,
+  isIP,
+  yaml: YAML,
+  getFlag,
+  removeFlag,
+  getISO,
+  Gist,
+  download,
+  isValidUUID,
+  doh,
+  Buffer,
+  Base64,
+  JSON5,
+  hex_md5,
+}
+
+function tryParse(parser: any, line: string): [any, any] {
+  if (!safeMatch(parser, line)) return [null, new Error('Parser mismatch')]
+  try {
+    const proxy = parser.parse(line)
+    return [proxy, null]
+  } catch (err) {
+    return [null, err]
+  }
+}
+
+function safeMatch(parser: any, line: string): boolean {
+  try {
+    return parser.test(line)
+  } catch (err) {
+    return false
+  }
+}
+
+function formatTransportPath(path: any) {
+  if (typeof path === 'string' || typeof path === 'number') {
+    path = String(path).trim()
+
+    if (path === '') {
+      return '/'
+    } else if (!path.startsWith('/')) {
+      return '/' + path
+    }
+  }
+  return path
+}
+
+function lastParse(proxy: any) {
+  // normalize keys to lowercase for all -opts keys and their subkeys
+  // 通常来说够用了, 在重构之前暂不考虑引入更复杂的逻辑
+  const hasOwn = (value: any, key: any) =>
+    Object.prototype.hasOwnProperty.call(value, key)
+  const normalizeOpts = (value: any) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return
+    for (const key of Object.keys(value)) {
+      const normalizedKey = key.toLowerCase()
+      if (key !== normalizedKey) {
+        if (!hasOwn(value, normalizedKey)) {
+          value[normalizedKey] = value[key]
+        }
+        delete value[key]
+      }
+    }
+  }
+  for (const key of Object.keys(proxy)) {
+    const normalizedKey = key.toLowerCase()
+    if (!normalizedKey.endsWith('-opts')) continue
+    if (key !== normalizedKey) {
+      if (!hasOwn(proxy, normalizedKey)) {
+        proxy[normalizedKey] = proxy[key]
+      }
+      delete proxy[key]
+    }
+    normalizeOpts(proxy[normalizedKey])
+  }
+  proxy.udp = ![false, 0, '0', 'false', 'off'].includes(
+    typeof proxy.udp === 'string' ? proxy.udp.toLowerCase() : proxy.udp,
+  )
+  if (typeof proxy.cipher === 'string') {
+    proxy.cipher = proxy.cipher.toLowerCase()
+  }
+  if (typeof proxy.password === 'number') {
+    proxy.password = numberToString(proxy.password)
+  }
+  if (proxy['hop-interval'] != null) {
+    const hopInterval = `${proxy['hop-interval']}`.trim()
+    const hopIntervalRangeMatch = hopInterval.match(/^(\d+)\s*-\s*(\d+)$/)
+
+    if (hopIntervalRangeMatch) {
+      const hopIntervalMin = parseInt(hopIntervalRangeMatch[1], 10)
+      const hopIntervalMax = parseInt(hopIntervalRangeMatch[2], 10)
+
+      if (hopIntervalMin > 0 && hopIntervalMin <= hopIntervalMax) {
+        // 暂时只在统一收口阶段拆分 mihomo 的 hop-interval 区间写法，
+        // 不对其他客户端做进一步转换，等 mihomo / sing-box 新版覆盖率上来后再统一处理。
+        proxy['hop-interval'] = hopIntervalMin
+        proxy['hop-interval-max'] = hopIntervalMax
+      } else {
+        delete proxy['hop-interval']
+        delete proxy['hop-interval-max']
+      }
+    } else if (/^\d+$/.test(hopInterval)) {
+      const parsedHopInterval = parseInt(hopInterval, 10)
+
+      if (parsedHopInterval > 0) {
+        proxy['hop-interval'] = parsedHopInterval
+        delete proxy['hop-interval-max']
+      } else {
+        delete proxy['hop-interval']
+        delete proxy['hop-interval-max']
+      }
+    } else {
+      delete proxy['hop-interval']
+      delete proxy['hop-interval-max']
+    }
+  }
+  if (
+    ['ss'].includes(proxy.type) &&
+    proxy.cipher === 'none' &&
+    !proxy.password
+  ) {
+    // https://github.com/MetaCubeX/mihomo/issues/1677
+    proxy.password = ''
+  }
+  if (proxy.interface) {
+    proxy['interface-name'] = proxy.interface
+    delete proxy.interface
+  }
+  if (isValidPortNumber(proxy.port)) {
+    proxy.port = parseInt(proxy.port, 10)
+  }
+  if (proxy.server) {
+    proxy.server = `${proxy.server}`
+      .trim()
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+  }
+  if (
+    ['vmess', 'vless', 'trojan', 'anytls'].includes(proxy.type) &&
+    proxy['shadow-tls-opts']
+  ) {
+    proxy.plugin = 'shadow-tls'
+    proxy['plugin-opts'] = {
+      host: proxy.sni,
+      password: proxy['shadow-tls-opts'].password,
+      version: proxy['shadow-tls-opts'].version,
+    }
+    delete proxy['shadow-tls-opts']
+  }
+  if (
+    proxy.type === 'snell' &&
+    proxy['obfs-opts']?.mode === 'shadow-tls' &&
+    !proxy.plugin
+  ) {
+    proxy.plugin = 'shadow-tls'
+    proxy['plugin-opts'] = {
+      host: proxy['obfs-opts'].host,
+      password: proxy['obfs-opts'].password,
+      version: proxy['obfs-opts'].version,
+      alpn: proxy['obfs-opts'].alpn,
+    }
+    delete proxy['obfs-opts']
+  }
+  if (proxy.plugin === 'shadow-tls' && proxy['plugin-opts']) {
+    if (proxy.alpn && !proxy['plugin-opts'].alpn) {
+      proxy['plugin-opts'].alpn = proxy.alpn
+    }
+    delete proxy.alpn
+  }
+  const xhttpDownloadSettings =
+    proxy.type === 'vless' && proxy.network === 'xhttp'
+      ? proxy['xhttp-opts']?.['download-settings']
+      : undefined
+  if (xhttpDownloadSettings?.['shadow-tls-opts']) {
+    xhttpDownloadSettings.plugin = 'shadow-tls'
+    xhttpDownloadSettings['plugin-opts'] = {
+      host: xhttpDownloadSettings.servername,
+      password: xhttpDownloadSettings['shadow-tls-opts'].password,
+      version: xhttpDownloadSettings['shadow-tls-opts'].version,
+    }
+    delete xhttpDownloadSettings['shadow-tls-opts']
+  }
+  if (
+    xhttpDownloadSettings?.plugin === 'shadow-tls' &&
+    xhttpDownloadSettings['plugin-opts']
+  ) {
+    if (
+      xhttpDownloadSettings.alpn &&
+      !xhttpDownloadSettings['plugin-opts'].alpn
+    ) {
+      xhttpDownloadSettings['plugin-opts'].alpn = xhttpDownloadSettings.alpn
+    }
+    delete xhttpDownloadSettings.alpn
+  }
+  if (proxy.network === 'ws') {
+    if (!proxy['ws-opts'] && (proxy['ws-path'] || proxy['ws-headers'])) {
+      proxy['ws-opts'] = {}
+      if (proxy['ws-path']) {
+        proxy['ws-opts'].path = proxy['ws-path']
+      }
+      if (proxy['ws-headers']) {
+        proxy['ws-opts'].headers = proxy['ws-headers']
+      }
+    }
+    delete proxy['ws-path']
+    delete proxy['ws-headers']
+  }
+
+  const transportPath = proxy[`${proxy.network}-opts`]?.path
+
+  if (Array.isArray(transportPath)) {
+    proxy[`${proxy.network}-opts`].path = transportPath.map((item: any) =>
+      formatTransportPath(item),
+    )
+  } else if (transportPath != null) {
+    proxy[`${proxy.network}-opts`].path = formatTransportPath(transportPath)
+  }
+
+  // network 逻辑有点乱了 可能还牵扯到别的逻辑 以后再优化...
+  // 以 mihomo 为准的话, 其实应该是
+  // network¶
+  // 传输层，支持 ws/grpc，不配置或配置其他值则为 tcp
+  if (proxy.type === 'trojan') {
+    proxy.network = proxy.network || 'tcp'
+  }
+  // network¶
+  // 传输层，支持 ws/http/h2/grpc，不配置或配置其他值则为 tcp
+  if (['vmess'].includes(proxy.type)) {
+    proxy.network = proxy.network || 'tcp'
+
+    proxy.cipher = proxy.cipher || 'none'
+    proxy.alterId = proxy.alterId || 0
+  }
+  // network¶
+  // 传输层，支持 ws/http/h2/grpc，不配置或配置其他值则为 tcp
+  if (['vless'].includes(proxy.type)) {
+    proxy.network = proxy.network || 'tcp'
+  }
+  if (
+    ['vmess', 'vless'].includes(proxy.type) &&
+    proxy['packet-encoding'] == null
+  ) {
+    if (proxy.xudp) {
+      proxy['packet-encoding'] = 'xudp'
+    } else if (proxy['packet-addr']) {
+      proxy['packet-encoding'] = 'packetaddr'
+    }
+  }
+  if (
+    [
+      'trojan',
+      'tuic',
+      'hysteria',
+      'hysteria2',
+      'juicity',
+      'anytls',
+      'trusttunnel',
+      'h2-connect',
+      'naive',
+      'masque',
+      'shadowquic',
+    ].includes(proxy.type)
+  ) {
+    proxy.tls = true
+  }
+  if (proxy.network) {
+    const transportHost = proxy[`${proxy.network}-opts`]?.headers?.Host
+    const transporthost = proxy[`${proxy.network}-opts`]?.headers?.host
+    if (proxy.network !== 'h2' && transporthost && !transportHost) {
+      proxy[`${proxy.network}-opts`].headers.Host = transporthost
+      delete proxy[`${proxy.network}-opts`].headers.host
+    }
+  }
+  if (proxy.network === 'h2') {
+    const h2Opts = proxy['h2-opts']
+    const host = h2Opts?.host ?? h2Opts?.headers?.host ?? h2Opts?.headers?.Host
+    const path = h2Opts?.path
+    if (host) {
+      h2Opts.host = Array.isArray(host) ? host : [host]
+    }
+    if (h2Opts?.headers) {
+      delete h2Opts.headers.host
+      delete h2Opts.headers.Host
+      if (Object.keys(h2Opts.headers).length === 0) {
+        delete h2Opts.headers
+      }
+    }
+    if (Array.isArray(path)) {
+      h2Opts.path = path[0]
+    }
+  }
+
+  // 非 tls, 有 ws/http 传输层, 使用域名的节点, 将设置传输层 Host 防止之后域名解析后丢失域名(不覆盖现有的 Host)
+  if (
+    !proxy.tls &&
+    ['ws', 'http'].includes(proxy.network) &&
+    !proxy[`${proxy.network}-opts`]?.headers?.Host &&
+    !isIP(proxy.server)
+  ) {
+    proxy[`${proxy.network}-opts`] = proxy[`${proxy.network}-opts`] || {}
+    proxy[`${proxy.network}-opts`].headers =
+      proxy[`${proxy.network}-opts`].headers || {}
+    proxy[`${proxy.network}-opts`].headers.Host =
+      ['vmess', 'vless'].includes(proxy.type) && proxy.network === 'http'
+        ? [proxy.server]
+        : proxy.server
+  }
+  // 统一将 VMess 和 VLESS 的 http 传输层的 path 和 Host 处理为数组
+  if (['vmess', 'vless'].includes(proxy.type) && proxy.network === 'http') {
+    const httpTransportPath = proxy[`${proxy.network}-opts`]?.path
+    const transportHost = proxy[`${proxy.network}-opts`]?.headers?.Host
+    if (transportHost && !Array.isArray(transportHost)) {
+      proxy[`${proxy.network}-opts`].headers.Host = [transportHost]
+    }
+    if (httpTransportPath && !Array.isArray(httpTransportPath)) {
+      proxy[`${proxy.network}-opts`].path = [httpTransportPath]
+    }
+  }
+  // 允许设置 sni 为空字符串且为防止影响其他逻辑, 这里先改成这样判断
+  // 本质上是为了防止本来应该使用 server 作为 sni 的情况下, 若之后进行了域名解析, 导致 server 变成 ip 丢失了 sni
+  // 为了兼容性, 暂时先这么改
+  if (proxy.tls && !proxy.sni && proxy.sni !== '') {
+    // 传输层若有设置就使用
+    if (proxy.network) {
+      let transportHost =
+        proxy.network === 'h2'
+          ? proxy['h2-opts']?.host
+          : proxy[`${proxy.network}-opts`]?.headers?.Host
+      transportHost = Array.isArray(transportHost)
+        ? transportHost[0]
+        : transportHost
+      if (transportHost) {
+        proxy.sni = transportHost
+      }
+    }
+    // 不区分是不是域名, 总之如果到这里还没 sni, 可以设置域名 server 为 sni
+    if (!proxy.sni && !isIP(proxy.server)) {
+      proxy.sni = proxy.server
+    }
+  }
+  // if (['hysteria', 'hysteria2', 'tuic'].includes(proxy.type)) {
+  if (proxy.ports) {
+    proxy.ports = String(proxy.ports).replace(/\//g, ',')
+  } else {
+    delete proxy.ports
+  }
+  // }
+  if (
+    ['hysteria2'].includes(proxy.type) &&
+    proxy.obfs &&
+    !['salamander'].includes(proxy.obfs) &&
+    !proxy['obfs-password']
+  ) {
+    proxy['obfs-password'] = proxy.obfs
+    proxy.obfs = 'salamander'
+  }
+  if (
+    ['hysteria2'].includes(proxy.type) &&
+    !proxy['obfs-password'] &&
+    proxy['obfs_password']
+  ) {
+    proxy['obfs-password'] = proxy['obfs_password']
+    delete proxy['obfs_password']
+  }
+  if (['vless'].includes(proxy.type)) {
+    // 删除 reality-opts: {}
+    if (
+      proxy['reality-opts'] &&
+      Object.keys(proxy['reality-opts']).length === 0
+    ) {
+      delete proxy['reality-opts']
+    }
+    // 删除 grpc-opts: {}
+    if (proxy['grpc-opts'] && Object.keys(proxy['grpc-opts']).length === 0) {
+      delete proxy['grpc-opts']
+    }
+    // 非 reality, 空 flow 没有意义
+    if (
+      (!proxy['reality-opts'] && !proxy.flow) ||
+      ['null', null].includes(proxy.flow)
+    ) {
+      delete proxy.flow
+    }
+    if (['http'].includes(proxy.network)) {
+      const httpTransportPath = proxy[`${proxy.network}-opts`]?.path
+      if (!httpTransportPath) {
+        if (!proxy[`${proxy.network}-opts`]) {
+          proxy[`${proxy.network}-opts`] = {}
+        }
+        proxy[`${proxy.network}-opts`].path = ['/']
+      }
+    }
+  }
+
+  if (typeof proxy.name !== 'string') {
+    if (/^\d+$/.test(proxy.name)) {
+      proxy.name = `${proxy.name}`
+    } else {
+      try {
+        if (proxy.name?.data) {
+          proxy.name = Buffer.from(proxy.name.data).toString('utf8')
+        } else {
+          proxy.name = Buffer.from(proxy.name).toString('utf8')
+        }
+      } catch (e) {
+        $.error(`proxy.name decode failed\nReason: ${e}`)
+        proxy.name = `${proxy.type} ${proxy.server}:${proxy.port}`
+      }
+    }
+  }
+  if (
+    ['ws', 'http', 'h2'].includes(proxy.network) &&
+    !['masque'].includes(proxy.type)
+  ) {
+    if (
+      ['ws', 'h2'].includes(proxy.network) &&
+      !proxy[`${proxy.network}-opts`]?.path
+    ) {
+      proxy[`${proxy.network}-opts`] = proxy[`${proxy.network}-opts`] || {}
+      proxy[`${proxy.network}-opts`].path = '/'
+    } else if (
+      proxy.network === 'http' &&
+      (!Array.isArray(proxy[`${proxy.network}-opts`]?.path) ||
+        proxy[`${proxy.network}-opts`]?.path.every((i: any) => !i))
+    ) {
+      proxy[`${proxy.network}-opts`] = proxy[`${proxy.network}-opts`] || {}
+      proxy[`${proxy.network}-opts`].path = ['/']
+    }
+  }
+  if (['anytls'].includes(proxy.type) && proxy['disable-reuse']) {
+    proxy.reuse = false
+  }
+  if (['', 'off'].includes(proxy.sni)) {
+    proxy['disable-sni'] = true
+  }
+  let caStr = proxy['ca_str']
+  if (proxy['ca-str']) {
+    caStr = proxy['ca-str']
+  } else if (caStr) {
+    delete proxy['ca_str']
+    proxy['ca-str'] = caStr
+  }
+  if (!proxy['tls-fingerprint'] && caStr) {
+    proxy['tls-fingerprint'] = rs.generateFingerprint(caStr)
+  }
+  if (['tuic'].includes(proxy.type)) {
+    proxy.alpn = Array.isArray(proxy.alpn) ? proxy.alpn : [proxy.alpn || 'h3']
+    proxy['congestion-controller'] = proxy['congestion-controller'] || 'cubic'
+    proxy['udp-relay-mode'] = proxy['udp-relay-mode'] || 'native'
+  }
+  if (['wireguard'].includes(proxy.type)) {
+    if (Array.isArray(proxy.peers) && proxy.peers.length > 0) {
+      const validPeer =
+        proxy.peers.find((peer: any) => peer.ip && peer.ipv6) ||
+        proxy.peers.find((peer: any) => peer.ip || peer.ipv6)
+      if (validPeer) {
+        if (!proxy.ip) {
+          proxy.ip = proxy.peers[0]?.ip
+        }
+        if (!proxy.ipv6) {
+          proxy.ipv6 = proxy.peers[0]?.ipv6
+        }
+      }
+    }
+    normalizeWireGuardInterface(proxy)
+  }
+  return proxy
+}
+
+function isIP(ip: any) {
+  return isIPv4(ip) || isIPv6(ip)
+}

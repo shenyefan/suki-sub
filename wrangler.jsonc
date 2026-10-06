@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "suki-sub",
+  "compatibility_date": "2025-09-02",
+  // TanStack Start 服务端要求 node:async_hooks
+  "compatibility_flags": ["nodejs_compat"],
+  // /api、/download、/share → Hono 后端;其余 → TanStack SSR;scheduled → 定时任务
+  "main": "./src/server/worker-entry.ts",
+  // 部署前 `wrangler d1 create suki-sub` 并回填 database_id;本地 dev 占位即可
+  "d1_databases": [
+    {
+      "binding": "SUKI_SUB_DB",
+      "database_name": "suki-sub",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // 部署前 `wrangler kv namespace create SUKI_SUB_CACHE` 并回填 id
+  "kv_namespaces": [
+    {
+      "binding": "SUKI_SUB_CACHE",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  // 脚本操作符沙箱(Dynamic Workers;需 Workers 付费计划)
+  "worker_loaders": [{ "binding": "SCRIPT_LOADER" }],
+  // Gist 自动备份
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  },
+  // 管理接口 OIDC 鉴权;本地开发写入 .dev.vars。
+  // 部署时 OIDC_CLIENT_SECRET 建议用 `wrangler secret put` 而非明文 vars
+  "vars": {
+    "OIDC_ISSUER": "",
+    "OIDC_AUDIENCE": "",
+    "OIDC_CLIENT_SECRET": ""
+  }
+}

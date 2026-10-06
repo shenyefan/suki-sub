@@ -1,0 +1,112 @@
+import { validateForSave } from '../core/validate-resource'
+import { getEngineStore, runWithEngineStore } from '../store/engine-store'
+import { RequestInvalidError } from '../core/errors'
+/**
+ * 环境信息与全量备份/恢复(/api/backup)。
+ */
+import { Hono } from 'hono'
+import type { Collection, ModuleItem, Subscription } from '#/shared/types'
+import { errorResponse } from './http'
+import { withApiStore } from '../store/bootstrap'
+import {
+  getAllSettings,
+  listCollections,
+  listModules,
+  listSubscriptions,
+  replaceAllSettings,
+  replaceCollections,
+  replaceModules,
+  replaceSubscriptions,
+} from '../store/d1'
+
+const app = new Hono<{ Bindings: Env }>()
+
+export interface BackendEnv {
+  backend: string
+  version: string
+  feature: Record<string, boolean>
+}
+
+export const backendEnv = (): BackendEnv => ({
+  backend: 'Workers',
+  version: '0.1.0',
+  feature: {
+    kv: true,
+    d1: true,
+    dynamicWorkersSandbox: true,
+    scriptOperator: true,
+    cron: true,
+  },
+})
+
+app.get('/api/env', (c) => c.json(backendEnv()))
+
+/** 全量导出 */
+app.get('/api/backup', async (c) =>
+  withApiStore(c.env, async () => {
+    try {
+      const db = c.env.SUKI_SUB_DB
+      const [subs, collections, modules, settings] = await Promise.all([
+        listSubscriptions(db),
+        listCollections(db),
+        listModules(db),
+        getAllSettings(db),
+      ])
+      return c.json({
+        version: '1',
+        exportedAt: new Date().toISOString(),
+        data: { subs, collections, modules, settings },
+      })
+    } catch (err) {
+      return errorResponse(c, err)
+    }
+  }),
+)
+
+/** 全量恢复:替换所有持久资源 */
+app.post('/api/backup', async (c) =>
+  withApiStore(c.env, async () => {
+    try {
+      const body = await c.req.json()
+      const data = body.data ?? body
+      for (const key of ['subs', 'collections', 'modules']) {
+        if (data[key] != null && !Array.isArray(data[key]))
+          throw new RequestInvalidError(
+            'INVALID_BODY',
+            `备份中的 ${key} 必须是数组`,
+          )
+      }
+      await runWithEngineStore(
+        {
+          ...getEngineStore(),
+          subs: data.subs ?? [],
+          collections: data.collections ?? [],
+          modules: data.modules ?? [],
+          settings: data.settings ?? getEngineStore().settings,
+        },
+        async () => {
+          for (const sub of data.subs ?? []) await validateForSave('sub', sub)
+          for (const collection of data.collections ?? [])
+            await validateForSave('collection', collection)
+        },
+      )
+      const db = c.env.SUKI_SUB_DB
+      await replaceSubscriptions(db, data.subs ?? [])
+      await replaceCollections(db, data.collections ?? [])
+      await replaceModules(db, data.modules ?? [])
+      if (data.settings) await replaceAllSettings(db, data.settings)
+      return c.json({ restored: true })
+    } catch (err) {
+      return errorResponse(c, err)
+    }
+  }),
+)
+
+export interface StorageData {
+  subs?: Subscription[]
+  collections?: Collection[]
+  modules?: ModuleItem[]
+  settings?: Record<string, unknown>
+}
+
+export default app

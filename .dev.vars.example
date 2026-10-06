@@ -1,0 +1,11 @@
+# 本地开发环境变量模板:复制为 .dev.vars 并填入实际值
+# OIDC 管理接口与登录流鉴权(必填,否则 /api/* 返回 503)
+OIDC_ISSUER=https://auth.syf.sh
+OIDC_AUDIENCE=your-client-id
+# 机密客户端的 client secret;公共客户端(PKCE)留空或省略
+OIDC_CLIENT_SECRET=
+
+# Telegram 通知（可选）。启用开关在每条订阅或组合订阅的编辑页。
+# 格式：telegram://Token@telegram?chats=会话ID。
+# 多个会话用逗号分隔；群组话题使用 chat_id:thread_id。
+SUKI_SUB_PUSH_SERVICE=telegram://123456:your-bot-token@telegram?chats=2143440808
