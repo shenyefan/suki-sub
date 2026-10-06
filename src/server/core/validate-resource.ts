@@ -124,17 +124,3 @@ export function contextualResourceError(
     { issues },
   )
 }
-
-export async function validateForSave(
-  kind: 'sub' | 'collection',
-  draft: Subscription | Collection,
-) {
-  assertResourceValid(kind, draft)
-  const { previewProcess } = await import('./preview-process')
-  try {
-    await previewProcess(kind, draft, true)
-  } catch (error) {
-    // 保存使用同一条错误链，保留上游原因、状态与字段定位。
-    throw contextualResourceError(error, kind, draft)
-  }
-}

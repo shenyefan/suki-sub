@@ -1,24 +1,15 @@
 /**
- * /api/* 管理接口的 OIDC 校验。
+ * OIDC 令牌校验原语(JWT 验签),供登录流与 /api/* 会话中间件共用。
  *
  * 配置(wrangler.jsonc vars 或 .dev.vars):
  * - OIDC_ISSUER:如 https://accounts.google.com
  * - OIDC_AUDIENCE:OIDC client id
  *
- * 请求携带 `Authorization: Bearer <access_token>`,用 jose 的远程 JWKS 验签,
- * 校验 iss / aud / exp。JWKS 按 issuer 进程内缓存(jose 自带)。
+ * 用 jose 的远程 JWKS 验签,校验 iss / aud / exp。
+ * JWKS 按 issuer 进程内缓存(jose 自带)。
  */
 import { createRemoteJWKSet, jwtVerify, decodeJwt } from 'jose'
-import { getCookie } from 'hono/cookie'
-import { failureResponse } from '../api/http'
 import { discover } from './discovery'
-import type { Context, Next } from 'hono'
-import { setAuditActor } from '../store/request-audit'
-
-interface OidcEnv {
-  OIDC_ISSUER?: string
-  OIDC_AUDIENCE?: string
-}
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
@@ -148,52 +139,5 @@ export async function verifyAccessToken(
     return payload
   } catch {
     return null
-  }
-}
-
-export function oidcMiddleware() {
-  return async (c: Context<{ Bindings: Env & OidcEnv }>, next: Next) => {
-    const { OIDC_ISSUER, OIDC_AUDIENCE } = c.env
-    if (!OIDC_ISSUER || !OIDC_AUDIENCE) {
-      return failureResponse(c, 'OIDC_NOT_CONFIGURED', '登录服务未配置', 503)
-    }
-    const auth = c.req.header('authorization') ?? ''
-    // 浏览器会话(/auth/login 建立)走 HttpOnly cookie;脚本调用走 Bearer
-    const token = auth.startsWith('Bearer ')
-      ? auth.slice(7).trim()
-      : (getCookie(c as never, 'su_at') ?? '')
-    if (!token) {
-      return failureResponse(c, 'UNAUTHORIZED', '请先登录', 401)
-    }
-    const payload = await verifyAccessToken(token, OIDC_ISSUER, OIDC_AUDIENCE)
-    if (!payload && !auth.startsWith('Bearer ')) {
-      const { readSession } = await import('./login')
-      const session = await readSession(c)
-      if (session.authenticated) {
-        if (session.user) setAuditActor(c, session.user)
-        await next()
-        return
-      }
-    }
-    if (!payload) {
-      return failureResponse(c, 'UNAUTHORIZED', '登录已过期，请重新登录', 401)
-    }
-    c.set('oidcClaims' as never, payload as never)
-    let identity = payload
-    const idToken = !auth.startsWith('Bearer ')
-      ? getCookie(c as never, 'su_id')
-      : undefined
-    if (idToken) {
-      try {
-        identity = await verifyIdToken(idToken, OIDC_ISSUER, OIDC_AUDIENCE, {
-          sub: String(payload.sub),
-          accessToken: token,
-        })
-      } catch {
-        /* 已验证访问凭据，显示信息回退到其声明。 */
-      }
-    }
-    setAuditActor(c, identity)
-    await next()
   }
 }

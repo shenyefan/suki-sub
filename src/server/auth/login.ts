@@ -9,8 +9,11 @@
  * - su_at   access token(Max-Age = expires_in)
  * - su_rt   refresh token(存在才写,30 天)
  * - su_user userinfo 摘要(展示用)
+ *
+ * 另导出 oidcMiddleware:/api/* 的会话校验中间件(Bearer 优先,浏览器回退会话 cookie)。
  */
 import { Hono } from 'hono'
+import type { Context, Next } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { verifyAccessToken, verifyIdToken, verifyUserInfoToken } from './oidc'
 import { failureResponse } from '../api/http'
@@ -306,6 +309,55 @@ export async function readSession(
     return { authenticated: true, user }
   } catch {
     return { authenticated: false }
+  }
+}
+
+/**
+ * /api/* 会话校验中间件:脚本调用走 `Authorization: Bearer <access_token>`,
+ * 浏览器会话(/auth/login 建立)走 HttpOnly cookie。
+ */
+export function oidcMiddleware() {
+  return async (c: Context<{ Bindings: Env & LoginEnv }>, next: Next) => {
+    const { OIDC_ISSUER, OIDC_AUDIENCE } = c.env
+    if (!OIDC_ISSUER || !OIDC_AUDIENCE) {
+      return failureResponse(c, 'OIDC_NOT_CONFIGURED', '登录服务未配置', 503)
+    }
+    const auth = c.req.header('authorization') ?? ''
+    const token = auth.startsWith('Bearer ')
+      ? auth.slice(7).trim()
+      : (getCookie(c as never, 'su_at') ?? '')
+    if (!token) {
+      return failureResponse(c, 'UNAUTHORIZED', '请先登录', 401)
+    }
+    const payload = await verifyAccessToken(token, OIDC_ISSUER, OIDC_AUDIENCE)
+    if (!payload && !auth.startsWith('Bearer ')) {
+      const session = await readSession(c)
+      if (session.authenticated) {
+        if (session.user) setAuditActor(c, session.user)
+        await next()
+        return
+      }
+    }
+    if (!payload) {
+      return failureResponse(c, 'UNAUTHORIZED', '登录已过期，请重新登录', 401)
+    }
+    c.set('oidcClaims' as never, payload as never)
+    let identity = payload
+    const idToken = !auth.startsWith('Bearer ')
+      ? getCookie(c as never, 'su_id')
+      : undefined
+    if (idToken) {
+      try {
+        identity = await verifyIdToken(idToken, OIDC_ISSUER, OIDC_AUDIENCE, {
+          sub: String(payload.sub),
+          accessToken: token,
+        })
+      } catch {
+        /* 已验证访问凭据，显示信息回退到其声明。 */
+      }
+    }
+    setAuditActor(c, identity)
+    await next()
   }
 }
 

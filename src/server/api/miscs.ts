@@ -1,4 +1,4 @@
-import { validateForSave } from '../core/validate-resource'
+import { validateForSave } from '../core/preview-process'
 import { getEngineStore, runWithEngineStore } from '../store/engine-store'
 import { RequestInvalidError } from '../core/errors'
 /**

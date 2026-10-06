@@ -1,6 +1,6 @@
 import { setResourceContext } from '../store/resource-context'
 import isEqual from 'lodash/isEqual.js'
-import { validateForSave } from '../core/validate-resource'
+import { validateForSave } from '../core/preview-process'
 /**
  * 订阅 CRUD:重命名级联(组合成员)、raw 导出。
  */

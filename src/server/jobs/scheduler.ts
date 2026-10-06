@@ -3,6 +3,7 @@
  * 每次 cron 触发:Gist 自动备份(配置了 gistToken 才执行)。
  */
 import { gistBackup } from './jobs'
+import { getAllSettings } from '../store/d1'
 import { writeServerEvent } from '../store/logs'
 
 export async function runScheduledJobs(
@@ -10,9 +11,7 @@ export async function runScheduledJobs(
   env: Env,
 ): Promise<void> {
   try {
-    const settings = await (
-      await import('../store/d1')
-    ).getAllSettings(env.SUKI_SUB_DB)
+    const settings = await getAllSettings(env.SUKI_SUB_DB)
     if (!settings['gistToken']) return
     const result = await gistBackup(env)
     writeServerEvent(

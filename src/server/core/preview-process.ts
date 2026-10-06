@@ -78,3 +78,17 @@ export async function previewProcess(
   )
   return { before, after }
 }
+
+/** 保存前的完整校验:静态检查 + 以保存模式跑一遍预览管线。 */
+export async function validateForSave(
+  kind: 'sub' | 'collection',
+  draft: Subscription | Collection,
+) {
+  assertResourceValid(kind, draft)
+  try {
+    await previewProcess(kind, draft, true)
+  } catch (error) {
+    // 保存使用同一条错误链，保留上游原因、状态与字段定位。
+    throw contextualResourceError(error, kind, draft)
+  }
+}
