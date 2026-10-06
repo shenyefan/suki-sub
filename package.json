@@ -1,6 +1,7 @@
 {
   "name": "suki-sub",
   "private": true,
+  "packageManager": "pnpm@12.9.1",
   "type": "module",
   "imports": {
     "#/*": "./src/*"
