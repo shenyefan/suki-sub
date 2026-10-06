@@ -2,6 +2,7 @@
  * 定时任务实现:Gist 自动备份。
  * 主 worker 与 cron scheduled() 共用;scheduler.ts 按 settings 分派。
  */
+import Gist from '../core/utils/gist'
 import { runWithEngineStore } from '../store/engine-store'
 import type { EngineStore } from '../store/engine-store'
 import {
@@ -40,7 +41,6 @@ export async function gistBackup(env: Env): Promise<JobResult> {
   const store = await loadJobStore(env)
   return runWithEngineStore(store, async () => {
     try {
-      const { default: Gist } = await import('../core/utils/gist')
       const gist = new Gist({
         token: String(store.settings['gistToken'] ?? ''),
       })
