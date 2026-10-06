@@ -453,9 +453,20 @@ async function exchangeThroughProxy(
   options: ProxyHttpRequestOptions,
 ): Promise<ProxyHttpResult> {
   const timeout = Number(options.timeout) || 8000
+  // startTls() 每个连接只能升级一次,https 代理访问 https 目标需要双重 TLS,明确拒绝。
+  if (proxy.protocol === 'https' && target.protocol === 'https:')
+    throw new RequestInvalidError(
+      'PROXY_TLS_UNSUPPORTED',
+      'https 代理访问 https 目标需要双重 TLS，当前运行时不支持，请改用 http 或 socks5 拉取代理',
+    )
+  // 需要 TLS 时(https 代理或 https 目标),connect 必须声明 starttls 模式才能升级。
+  const needsTls = proxy.protocol === 'https' || target.protocol === 'https:'
   const socket = connect(
     { hostname: proxy.hostname, port: proxy.port },
-    { allowHalfOpen: false },
+    {
+      allowHalfOpen: false,
+      ...(needsTls ? { secureTransport: 'starttls' as const } : {}),
+    },
   )
   let active = socket
   let timer: ReturnType<typeof setTimeout> | undefined
