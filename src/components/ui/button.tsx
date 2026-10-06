@@ -49,21 +49,29 @@ function Button({
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
-    /** 提交进行中：按钮禁用并显示旋转图标，避免重复点击。 */
+    /** 请求进行中：禁用按钮，已有图标替换为旋转图标，无图标时前置。 */
     loading?: boolean
   }) {
   const Comp = asChild ? Slot : 'button'
-  // asChild 时必须保持单一子元素,否则 Slot 会抛错;加载图标仅在普通模式下前置。
+  // asChild 时保持单一子元素；普通模式加载时隐藏原图标，保留文字和布局。
   return (
     <Comp
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(
+        buttonVariants({ variant, size, className }),
+        loading && !asChild && '[&>svg:not([data-slot=button-spinner])]:hidden',
+      )}
       disabled={disabled || loading || undefined}
+      aria-busy={loading || undefined}
       {...props}
     >
       {loading && !asChild ? (
         <>
-          <Loader2 className="animate-spin" aria-hidden />
+          <Loader2
+            data-slot="button-spinner"
+            className="animate-spin"
+            aria-hidden
+          />
           {children}
         </>
       ) : (
