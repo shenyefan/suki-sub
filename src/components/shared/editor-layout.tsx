@@ -1,8 +1,9 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ChevronRight, Layers } from 'lucide-react'
 import { Separator } from '#/components/ui/separator'
+import { SectionNavigation } from '#/components/shared/section-navigation'
 import { Button } from '#/components/ui/button'
 import { EditorActions } from '#/components/shared/editor-actions'
 import type { EditorAction } from '#/components/shared/editor-actions'
@@ -25,10 +26,11 @@ export function EditorLayout({
   actions: ReactNode
   children: ReactNode
 }) {
+  const root = useRef<HTMLDivElement>(null)
   const [toolbarActions, setToolbarActions] = useState<EditorAction[]>([])
   return (
     <EditorToolbarContext.Provider value={setToolbarActions}>
-      <div className="min-w-0">
+      <div ref={root} className="min-w-0">
         <header className="editor-topbar">
           <Button
             variant="ghost"
@@ -90,6 +92,7 @@ export function EditorLayout({
         <div className="page-container editor-body px-5 sm:px-6">
           {children}
         </div>
+        <SectionNavigation root={root} />
       </div>
     </EditorToolbarContext.Provider>
   )

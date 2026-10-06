@@ -195,6 +195,7 @@
     @apply grid min-w-0 items-start gap-5;
   }
 
+  .editor-page [data-editor-section],
   .editor-page [data-validation-operator],
   .editor-page input,
   .editor-page textarea,

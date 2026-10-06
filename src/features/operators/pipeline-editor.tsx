@@ -373,6 +373,9 @@ export function PipelineEditor({
                     '@container min-w-0 rounded-lg border bg-card',
                     item.disabled && 'border-dashed',
                   )}
+                  id={`editor-operation-${index}`}
+                  data-editor-section={`${index + 1}. ${label}`}
+                  data-editor-summary={`${item.disabled ? '已停用' : '已启用'} · ${OPERATORS.find((operator) => operator.type === item.type)?.description ?? item.type}`}
                   data-validation-operator={index}
                   tabIndex={-1}
                   aria-label={`${index + 1}. ${label}`}

@@ -235,7 +235,16 @@ function SubEditorPage() {
           </Button>
         }
       >
-        <section className="editor-section">
+        <section
+          id="editor-basic"
+          data-editor-section="基础信息"
+          data-editor-summary={
+            form.name ? `订阅：${resourceLabel(form)}` : '名称、来源及订阅设置'
+          }
+          tabIndex={-1}
+          aria-label="基础信息"
+          className="editor-section"
+        >
           <div className="grid min-w-0 gap-3">
             <h2 className="editor-section-title">基本信息</h2>
             <div className="grid items-start gap-3 sm:grid-cols-2">
@@ -451,7 +460,14 @@ function SubEditorPage() {
           </div>
         </section>
 
-        <section className="min-w-0">
+        <section
+          id="editor-process"
+          data-editor-section="节点操作"
+          data-editor-summary={`${process.length} 项操作，按从上到下的顺序执行`}
+          tabIndex={-1}
+          aria-label="节点操作"
+          className="min-w-0"
+        >
           <PipelineEditor
             issues={validation.issues.filter(
               (issue) =>

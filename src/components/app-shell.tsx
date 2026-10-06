@@ -6,6 +6,7 @@
  */
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useState } from 'react'
+import * as ScrollAreaPrimitive from '@radix-ui/react-scroll-area'
 import { useQuery } from '@tanstack/react-query'
 import { Layers, LogOut, ScrollText, Settings, Share2 } from 'lucide-react'
 
@@ -15,6 +16,7 @@ import { AuthRoutes } from '#/shared/api-contract'
 import { ErrorPanel } from '#/components/shared/error-panel'
 import { cn } from '#/lib/utils'
 import { Button } from '#/components/ui/button'
+import { ScrollBar } from '#/components/ui/scroll-area'
 import { ThemeToggle } from '#/components/theme-toggle'
 
 const NAV_ITEMS = [
@@ -174,14 +176,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="min-w-0 md:pl-56">
-        <main
-          id="content"
-          className="h-[calc(100dvh-3rem)] min-w-0 overflow-y-auto overscroll-contain md:h-dvh"
-        >
-          {children}
+      <ScrollAreaPrimitive.Root
+        asChild
+        type="scroll"
+        className="relative h-[calc(100dvh-3rem)] min-w-0 overflow-hidden md:ml-56 md:h-dvh"
+      >
+        <main>
+          {/* 把 sr-only 等绝对定位子元素约束在视口内，避免撑出外层滚动条。 */}
+          <ScrollAreaPrimitive.Viewport
+            id="content"
+            tabIndex={-1}
+            className="relative size-full min-w-0 overscroll-contain [&>div]:!block"
+          >
+            {children}
+          </ScrollAreaPrimitive.Viewport>
+          <ScrollBar />
         </main>
-      </div>
+      </ScrollAreaPrimitive.Root>
 
       {/* 手机底栏 */}
       <nav
