@@ -26,7 +26,6 @@ import {
   maskAgeSecretInUrl,
 } from '#/server/core/utils/age'
 import { getEngineStore } from '#/server/store/engine-store'
-import { proxyHttpRequest } from './proxy-fetch'
 
 const clashPreprocessor = PROXY_PREPROCESSORS.find(
   (processor: any) => processor.name === 'Clash Pre-processor',
@@ -36,7 +35,7 @@ const clashPreprocessor = PROXY_PREPROCESSORS.find(
 async function httpRequest(
   method: 'GET' | 'HEAD',
   url: string,
-  options: { headers?: any; timeout?: any; proxy?: any },
+  options: { headers?: any; timeout?: any },
 ): Promise<{
   headers: Record<string, string>
   body: string
@@ -46,17 +45,6 @@ async function httpRequest(
   // Match Suki Sub's Node transport without overriding custom Accept headers.
   const requestHeaders = new Headers(options.headers)
   if (!requestHeaders.has('accept')) requestHeaders.set('accept', '*/*')
-  if (options.proxy) {
-    const flat: Record<string, string> = {}
-    requestHeaders.forEach((value, key) => {
-      flat[key] = value
-    })
-    return proxyHttpRequest(method, url, {
-      headers: flat,
-      timeout,
-      proxy: options.proxy,
-    })
-  }
   const res = await fetch(url, {
     method,
     headers: requestHeaders,
@@ -191,7 +179,6 @@ export default async function download(
   rawUrl: string = '',
   ua: any,
   timeout: any,
-  customProxy: any,
   skipCustomCache: any,
   awaitCustomCache: any,
   noCache: any,
@@ -218,15 +205,11 @@ export default async function download(
   const {
     githubProxy,
     githubProxyRegex,
-    defaultProxy,
     defaultUserAgent,
     defaultTimeout,
     cacheThreshold: defaultCacheThreshold,
   } = ($.read(SETTINGS_KEY) || {}) as any
   const cacheThreshold = defaultCacheThreshold || 1024
-  const proxy = customProxy || defaultProxy
-  if (proxy)
-    $.debug(`本次下载经由拉取代理: ${maskAgeSecretInUrl(String(proxy))}`)
   const userAgent =
     String(ua || defaultUserAgent || 'clash.meta/v1.19.23').trim() ||
     'clash.meta/v1.19.23'
@@ -298,7 +281,6 @@ export default async function download(
             rawUrl.replace(/(\?|&)cacheKey=.*?(&|$)/, ''),
             ua,
             timeout,
-            proxy,
             true,
             undefined,
             undefined,
@@ -322,7 +304,6 @@ export default async function download(
           rawUrl.replace(/(\?|&)cacheKey=.*?(&|$)/, ''),
           ua,
           timeout,
-          proxy,
           true,
           undefined,
           undefined,
@@ -387,7 +368,7 @@ export default async function download(
         customHeaders
           ? JSON.stringify(customHeaders)
           : `User-Agent: ${userAgent}`
-      }\nTimeout: ${requestTimeout}\nProxy: ${proxy}\nInsecure: ${!!insecure}\nPreprocess: ${preprocess}\nURL: ${safeUrl}`,
+      }\nTimeout: ${requestTimeout}\nInsecure: ${!!insecure}\nPreprocess: ${preprocess}\nURL: ${safeUrl}`,
     )
     try {
       const { body, headers, statusCode } = await runBackendRequestTask(
@@ -397,7 +378,6 @@ export default async function download(
               'User-Agent': userAgent,
             },
             timeout: requestTimeout,
-            proxy,
           }),
         'download',
       )
@@ -485,7 +465,6 @@ export default async function download(
           rawUrl,
           $arguments.flowUserAgent || userAgent,
           undefined,
-          proxy,
           $arguments.flowUrl,
           $arguments.flowHeaders,
         ),

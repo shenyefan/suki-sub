@@ -95,7 +95,7 @@ KV(`store/kv.ts`)只放时效数据:分享 token(`token:<id>`)与远程订阅缓
 | --- | --- |
 | `new Function` | 禁用,走上面的 Dynamic Workers 沙箱 |
 | `peggy.generate()` 运行时生成解析器 | 构建期预生成 `parsers/peggy/*.gen.ts`;语法在 `grammars/*.peggy`,重新生成命令写在同目录同名 `.ts` 文件头部注释 |
-| undici / 自定义代理 | 直连用原生 `fetch`;配了拉取代理(订阅 `proxy` 或设置 `defaultProxy`)走 `core/utils/proxy-fetch.ts` 的 `cloudflare:sockets` TCP 隧道(http/https CONNECT、socks5),https 目标 `startTls()` 升级 |
+| undici / 自定义代理 | 一律用原生 `fetch`,**不支持代理字段**(2026-10-07 移除:实测生产边缘的 TCP 隧道内无法升级 TLS,startTls/隐式 TLS 均被拒,仅本地 workerd 可行)。需要固定出口 IP 时由用户自建 nginx 反代、把反代地址直接填进订阅链接 |
 | MMDB / geoip2 | 改为名称回退识别(`core/utils/geo.ts`) |
 | DNS udp/tcp | 只支持 DoH(`core/utils/dns.ts`) |
 | 进程内 cron 调度 | 改为 Cron Triggers |

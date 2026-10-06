@@ -28,8 +28,6 @@ export interface Subscription {
   source?: string
   /** 自定义流量信息头(subscription-userinfo)或其获取地址 */
   subUserinfo?: string
-  /** 拉取订阅使用的代理地址 */
-  proxy?: string
   /** 跳过流量信息 */
   noFlow?: boolean
   /** 忽略失败的远程子订阅(多 URL 场景) */

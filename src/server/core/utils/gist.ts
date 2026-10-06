@@ -120,17 +120,14 @@ export default class Gist {
   _requestQueue: Promise<any>
 
   constructor({ token, key, syncPlatform }: any) {
-    const { defaultProxy, githubApiTimeout, githubProxy, githubApiUrl } =
-      ($.read(SETTINGS_KEY) || {}) as any
+    const { githubApiTimeout, githubProxy, githubApiUrl } = ($.read(
+      SETTINGS_KEY,
+    ) || {}) as any
     const githubApiRequestTimeout = githubApiTimeout || 10000
     const githubGistBaseURL = getGithubGistBaseURL({
       githubApiUrl,
       githubProxy,
     })
-    const proxy = defaultProxy
-    if (proxy) {
-      $.info('当前环境不支持代理，已忽略代理设置')
-    }
 
     if (syncPlatform === 'gitlab') {
       this.headers = {
@@ -144,7 +141,6 @@ export default class Gist {
           ...this.headers,
         },
 
-        ...(proxy ? { proxy } : {}),
         timeout: githubApiRequestTimeout,
 
         events: {
@@ -169,7 +165,6 @@ export default class Gist {
           ...this.headers,
         },
 
-        ...(proxy ? { proxy } : {}),
         timeout: githubApiRequestTimeout,
 
         events: {

@@ -129,7 +129,6 @@ function downloadHandler(kind: 'subscription' | 'collection', name: string) {
                     sub.url,
                     sub.ua ?? undefined,
                     undefined,
-                    sub.proxy,
                     undefined,
                     undefined,
                   )

@@ -6,7 +6,12 @@ import { errorResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
 import { getSubscription } from '../store/d1'
 import { getFlowHeaders, parseFlowHeaders } from '../core/utils/flow'
-import { derivePublicKey, generateKeyPair } from '../core/utils/age'
+import {
+  AGE_PUBLIC_KEY,
+  AGE_SECRET_KEY,
+  derivePublicKey,
+  generateKeyPair,
+} from '../core/utils/age'
 import { RequestInvalidError, ResourceNotFoundError } from '../core/errors'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -44,7 +49,6 @@ app.get('/api/subs/:name/flow', async (c) =>
             sub.subUserinfo,
             undefined,
             undefined,
-            sub.proxy,
             undefined,
             undefined,
           )
@@ -69,7 +73,6 @@ app.get('/api/subs/:name/flow', async (c) =>
           firstUrl,
           sub.ua ?? undefined,
           undefined,
-          sub.proxy,
           undefined,
           undefined,
         )
@@ -89,7 +92,6 @@ app.get('/api/subs/:name/flow', async (c) =>
           sub.subUserinfo,
           undefined,
           undefined,
-          sub.proxy,
           undefined,
           undefined,
         )
@@ -109,7 +111,12 @@ app.get('/api/subs/:name/flow', async (c) =>
 /** age 密钥对生成 */
 app.post('/api/age/keys', async (c) => {
   try {
-    return c.json(await generateKeyPair())
+    const keys = await generateKeyPair()
+    // 前端契约是 camelCase;age.ts 内部常量是 kebab-case,这里做一次映射。
+    return c.json({
+      publicKey: keys[AGE_PUBLIC_KEY],
+      secretKey: keys[AGE_SECRET_KEY],
+    })
   } catch (err) {
     return errorResponse(c, err)
   }

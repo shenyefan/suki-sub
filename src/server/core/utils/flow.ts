@@ -8,13 +8,12 @@ import { hex_md5 } from '#/server/core/vendor/md5'
 import $ from '#/server/core/app'
 import headersResourceCache from '#/server/core/utils/headers-resource-cache'
 import { runBackendRequestTask } from '#/server/core/utils/request-concurrency'
-import { proxyHttpRequest } from './proxy-fetch'
 
 // 返回 { headers, body, statusCode }(headers 为小写键)
 async function httpRequest(
   method: 'GET' | 'HEAD',
   url: string,
-  options: { headers?: any; timeout?: any; proxy?: any },
+  options: { headers?: any; timeout?: any },
 ): Promise<{
   headers: Record<string, string>
   body: string
@@ -24,17 +23,6 @@ async function httpRequest(
   const requestHeaders = new Headers(options.headers)
   if (!requestHeaders.has('accept')) requestHeaders.set('accept', '*/*')
   try {
-    if (options.proxy) {
-      const flat: Record<string, string> = {}
-      requestHeaders.forEach((value, key) => {
-        flat[key] = value
-      })
-      return await proxyHttpRequest(method, url, {
-        headers: flat,
-        timeout,
-        proxy: options.proxy,
-      })
-    }
     const res = await fetch(url, {
       method,
       headers: requestHeaders,
@@ -79,7 +67,6 @@ export async function getFlowHeaders(
   rawUrl: any,
   ua: any,
   timeout: any,
-  customProxy: any,
   flowUrl: any,
   flowHeaders: any,
 ) {
@@ -94,13 +81,9 @@ export async function getFlowHeaders(
     ? //      Workers 非 Node,固定取 { insecure: true }(仅用于日志,fetch 不支持该选项)
       { insecure: true }
     : undefined
-  const {
-    defaultProxy,
-    defaultFlowUserAgent,
-    defaultUserAgent,
-    defaultTimeout,
-  } = ($.read(SETTINGS_KEY) || {}) as any
-  const proxy = customProxy || defaultProxy
+  const { defaultFlowUserAgent, defaultUserAgent, defaultTimeout } = ($.read(
+    SETTINGS_KEY,
+  ) || {}) as any
   const userAgent =
     String(
       ua || defaultFlowUserAgent || defaultUserAgent || 'clash.meta/v1.19.23',
@@ -154,7 +137,6 @@ export async function getFlowHeaders(
           httpRequest('GET', url, {
             headers: customHeaders || { 'User-Agent': userAgent },
             timeout: requestTimeout,
-            proxy,
           }),
         'flow body GET',
       )
@@ -189,7 +171,7 @@ export async function getFlowHeaders(
             customHeaders
               ? JSON.stringify(customHeaders)
               : `User-Agent: ${userAgent || ''}`
-          }, Insecure: ${!!insecure}, Proxy: ${proxy}`,
+          }, Insecure: ${!!insecure}`,
         )
         const { headers, statusCode } = await runBackendRequestTask(
           () =>
@@ -204,7 +186,6 @@ export async function getFlowHeaders(
                   'User-Agent': userAgent,
                 },
                 timeout: requestTimeout,
-                proxy,
               },
             ),
           'flow headers HEAD',
@@ -223,9 +204,7 @@ export async function getFlowHeaders(
             customHeaders
               ? JSON.stringify(customHeaders)
               : `User-Agent: ${userAgent || ''}`
-          }, Insecure: ${!!insecure}, Proxy: ${proxy}: ${
-            (e as any).message ?? e
-          }`,
+          }, Insecure: ${!!insecure}: ${(e as any).message ?? e}`,
         )
       }
       if (!flowInfo) {
@@ -234,7 +213,7 @@ export async function getFlowHeaders(
             customHeaders
               ? JSON.stringify(customHeaders)
               : `User-Agent: ${userAgent || ''}`
-          }, Insecure: ${!!insecure}, Proxy: ${proxy}`,
+          }, Insecure: ${!!insecure}`,
         )
         const { headers, statusCode } = await runBackendRequestTask(
           () =>
@@ -249,7 +228,6 @@ export async function getFlowHeaders(
                   'User-Agent': userAgent,
                 },
                 timeout: requestTimeout,
-                proxy,
               },
             ),
           'flow headers GET',

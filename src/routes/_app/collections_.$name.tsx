@@ -1,4 +1,7 @@
-import { SubscriptionBehaviorFields } from '#/components/shared/subscription-behavior'
+import {
+  SubscriptionBehaviorFields,
+  SubscriptionNotificationField,
+} from '#/components/shared/subscription-behavior'
 import { useResourceValidation } from '#/lib/resource-validation'
 import { ValidationHint } from '#/components/shared/validation-hint'
 /**
@@ -158,16 +161,7 @@ function CollectionEditorPage() {
           </Button>
         }
       >
-        <section
-          id="editor-basic"
-          data-editor-section="基础信息"
-          data-editor-summary={
-            form.name ? `订阅：${resourceLabel(form)}` : '名称、来源及订阅设置'
-          }
-          tabIndex={-1}
-          aria-label="基础信息"
-          className="editor-section"
-        >
+        <section className="editor-section">
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <h2 className="editor-section-title sm:col-span-2 ">基本信息</h2>
             <div className="grid min-w-0 content-start gap-2">
@@ -363,19 +357,18 @@ function CollectionEditorPage() {
             <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
               高级设置
             </summary>
-            <div className="mt-3">
+            <div className="mt-3 grid gap-3">
               <SubscriptionBehaviorFields value={form} onChange={patch} />
+              <SubscriptionNotificationField
+                id="col-telegram"
+                className="border-t pt-4"
+                value={form}
+                onChange={patch}
+              />
             </div>
           </details>
         </section>
-        <section
-          id="editor-process"
-          data-editor-section="节点操作"
-          data-editor-summary={`${process.length} 项操作，按从上到下的顺序执行`}
-          tabIndex={-1}
-          aria-label="节点操作"
-          className="min-w-0"
-        >
+        <section className="min-w-0">
           <PipelineEditor
             issues={validation.issues.filter(
               (issue) =>

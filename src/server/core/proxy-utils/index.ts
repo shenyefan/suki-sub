@@ -432,7 +432,6 @@ async function loadScriptItem(
           undefined,
           undefined,
           undefined,
-          undefined,
           { noFlow: executionContext.noFlow },
         )
         // $.info(`Script loaded: >>>\n ${script}`);
