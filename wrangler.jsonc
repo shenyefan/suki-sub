@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "suki-sub",
+  "name": "sub",
   "compatibility_date": "2025-09-02",
   // TanStack Start 服务端要求 node:async_hooks
   "compatibility_flags": ["nodejs_compat"],
@@ -11,7 +11,7 @@
     {
       "binding": "SUKI_SUB_DB",
       "database_name": "suki-sub",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b7a7f890-1568-4bac-8fd4-40f3e21144f2",
       "migrations_dir": "migrations"
     }
   ],
@@ -19,7 +19,7 @@
   "kv_namespaces": [
     {
       "binding": "SUKI_SUB_CACHE",
-      "id": "00000000000000000000000000000000"
+      "id": "f0c35363a35a41a6818d05295ecc0018"
     }
   ],
   // 脚本操作符沙箱(Dynamic Workers;需 Workers 付费计划)
