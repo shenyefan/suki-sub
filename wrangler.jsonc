@@ -27,12 +27,5 @@
   // Gist 自动备份
   "triggers": {
     "crons": ["0 */6 * * *"]
-  },
-  // 管理接口 OIDC 鉴权;本地开发写入 .dev.vars。
-  // 部署时 OIDC_CLIENT_SECRET 建议用 `wrangler secret put` 而非明文 vars
-  "vars": {
-    "OIDC_ISSUER": "",
-    "OIDC_AUDIENCE": "",
-    "OIDC_CLIENT_SECRET": ""
   }
 }
