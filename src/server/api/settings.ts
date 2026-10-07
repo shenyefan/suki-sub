@@ -10,6 +10,11 @@ import { getAllSettings, reorderTable, saveSettings } from '../store/d1'
 import { getEngineStore } from '../store/engine-store'
 import { resourceLabel } from '#/lib/resource-display'
 import { RequestInvalidError } from '../core/errors'
+import {
+  TELEGRAM_NOTIFICATIONS,
+  telegramCategoryMode,
+  telegramMasterMode,
+} from '#/shared/telegram-notifications'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -31,10 +36,58 @@ app.patch('/api/settings', async (c) =>
     try {
       const patch = await c.req.json()
       delete patch.telegramConfiguration
+      for (const key of [
+        'telegramNotificationMode',
+        ...TELEGRAM_NOTIFICATIONS.map((item) => item.key),
+      ]) {
+        const value = patch[key]
+        if (
+          value != null &&
+          !['off', 'errors', 'all'].includes(value) &&
+          !(key !== 'telegramNotificationMode' && typeof value === 'boolean')
+        )
+          throw new RequestInvalidError(
+            'INVALID_NOTIFICATION_MODE',
+            '通知范围必须是关闭、仅异常或全部',
+            { field: key },
+          )
+      }
       const current = await getAllSettings(c.env.SUKI_SUB_DB)
+      const next = { ...current, ...patch }
+      const categories = [
+        { key: 'telegramNotificationMode', label: '通知总范围' },
+        ...TELEGRAM_NOTIFICATIONS,
+      ]
+      const notificationChanges = categories.flatMap((item) => {
+        const before =
+          item.key === 'telegramNotificationMode'
+            ? telegramMasterMode(current)
+            : telegramCategoryMode(current, item.key)
+        const after =
+          item.key === 'telegramNotificationMode'
+            ? telegramMasterMode(next)
+            : telegramCategoryMode(next, item.key)
+        return before === after ? [] : [{ label: item.label, before, after }]
+      })
+      const changedFields = Object.keys(patch).filter((key) => {
+        if (
+          key === 'telegramEnabled' ||
+          categories.some((item) => item.key === key)
+        )
+          return false
+        return !isEqual(current[key], patch[key])
+      })
+      c.set(
+        'operationDetails' as never,
+        {
+          changedFields,
+          notificationChanges,
+        } as never,
+      )
       c.set(
         'operationUnchanged' as never,
-        isEqual(current, { ...current, ...patch }) as never,
+        (changedFields.length === 0 &&
+          notificationChanges.length === 0) as never,
       )
       await saveSettings(c.env.SUKI_SUB_DB, { ...current, ...patch })
       return c.json({

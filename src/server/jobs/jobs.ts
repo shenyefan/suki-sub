@@ -34,6 +34,7 @@ export interface JobResult {
   job: string
   ok: boolean
   detail?: unknown
+  context?: Record<string, unknown>
 }
 
 /** Gist 自动备份:全量数据推送 Gist */
@@ -63,12 +64,29 @@ export async function gistBackup(env: Env): Promise<JobResult> {
         2,
       )
       await gist.upload({ [`${name}.json`]: { content } })
-      return { job: 'gist-backup', ok: true }
+      return {
+        context: {
+          backupName: name,
+          backupFile: `${name}.json`,
+          backupPlatform:
+            store.settings.syncPlatform === 'gitlab' ? 'gitlab' : 'gist',
+          subscriptionCount: subs.length,
+          collectionCount: collections.length,
+          moduleCount: modules.length,
+        },
+        job: 'gist-backup',
+        ok: true,
+      }
     } catch (err) {
       return {
         job: 'gist-backup',
         ok: false,
         detail: err instanceof Error ? err.message : String(err),
+        context: {
+          backupName: store.settings.gistBackupName || 'suki-sub-backup',
+          backupPlatform:
+            store.settings.syncPlatform === 'gitlab' ? 'gitlab' : 'gist',
+        },
       }
     }
   })

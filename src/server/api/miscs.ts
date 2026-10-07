@@ -47,8 +47,10 @@ app.get('/api/env', (c) => c.json(backendEnv()))
 app.post(ApiRoutes.backupSync, async (c) => {
   try {
     const result = await gistBackup(c.env)
+    c.set('operationDetails' as never, result.context as never)
     if (!result.ok)
       return failureResponse(c, 'BACKUP_FAILED', '备份失败', 502, {
+        ...result.context,
         reason: result.detail,
       })
     return c.json({ backedUp: true })

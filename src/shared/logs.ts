@@ -111,6 +111,7 @@ export const LOG_ACTION_LABELS: Record<string, string> = {
 for (const [kind, label] of Object.entries({
   sub: '订阅',
   collection: '组合订阅',
+  module: '脚本模块',
 })) {
   for (const [verb, text] of Object.entries({
     create: '创建',

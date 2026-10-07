@@ -10,6 +10,7 @@ export async function runScheduledJobs(
   controller: ScheduledController,
   env: Env,
 ): Promise<void> {
+  const startedAt = Date.now()
   try {
     const settings = await getAllSettings(env.SUKI_SUB_DB)
     if (!settings['gistToken']) return
@@ -19,6 +20,8 @@ export async function runScheduledJobs(
       result.ok ? '自动备份完成' : '自动备份失败',
       {
         action: 'backup.scheduled',
+        ...result.context,
+        durationMs: Date.now() - startedAt,
         schedule: controller.cron,
         ...(result.detail ? { reason: result.detail } : {}),
       },

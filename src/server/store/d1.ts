@@ -192,7 +192,7 @@ export async function updateSubscriptionRow(
   newName?: string,
 ): Promise<void> {
   const r = subToRow(newName ?? sub.name, sub)
-  await db
+  const statement = db
     .prepare(
       'UPDATE subscriptions SET name=?1, url=?2, user_agent=?3, merge_sources=?4, process=?5, extra=?6, updated_at=?7 WHERE name=?8',
     )
@@ -206,7 +206,19 @@ export async function updateSubscriptionRow(
       now(),
       name,
     )
-    .run()
+  // 名称与组合引用必须在同一事务中更新；名称冲突时整批回滚。
+  await db.batch([
+    statement,
+    ...(r.name !== name
+      ? [
+          db
+            .prepare(
+              'UPDATE collection_sources SET value=?1 WHERE kind=?2 AND value=?3',
+            )
+            .bind(r.name, 'subscription', name),
+        ]
+      : []),
+  ])
 }
 
 export async function deleteSubscriptionRow(
@@ -218,21 +230,6 @@ export async function deleteSubscriptionRow(
     .bind(name)
     .run()
   return res.meta.changes > 0
-}
-
-/** 重命名订阅 → 级联更新组合成员 */
-export async function renameSubscriptionRefs(
-  db: D1Database,
-  oldName: string,
-  newName: string,
-): Promise<void> {
-  await db.batch([
-    db
-      .prepare(
-        'UPDATE collection_sources SET value=?1 WHERE kind=?2 AND value=?3',
-      )
-      .bind(newName, 'subscription', oldName),
-  ])
 }
 
 /** 删除订阅 → 从组合成员中移除 */

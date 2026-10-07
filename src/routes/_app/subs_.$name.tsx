@@ -178,6 +178,12 @@ function SubEditorPage() {
     onSuccess: (saved) => {
       toast.success(isNew ? '订阅已创建' : '订阅已保存')
       void client.invalidateQueries({ queryKey: qk.subs })
+      const resource = saved as Subscription
+      client.setQueryData(['sub', resource.name], resource)
+      if (resource.name === name)
+        void client.invalidateQueries({ queryKey: ['sub', name] })
+      void client.invalidateQueries({ queryKey: qk.tokens })
+      void client.invalidateQueries({ queryKey: qk.collections })
       void navigate({
         to: '/subs/$name',
         params: { name: (saved as Subscription).name },
@@ -257,8 +263,6 @@ function SubEditorPage() {
                   aria-describedby="sub-name-error"
                   value={form.name}
                   onChange={(e) => patch({ name: e.target.value })}
-                  readOnly={!isNew}
-                  aria-readonly={!isNew}
                   placeholder="唯一名称，不可包含 /"
                 />
                 <ValidationHint

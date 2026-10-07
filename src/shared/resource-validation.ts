@@ -32,9 +32,10 @@ export function validateResource(
   if (
     typeof draft.name !== 'string' ||
     !draft.name.trim() ||
-    resourceName.includes('/')
+    resourceName.includes('/') ||
+    resourceName === 'UNTITLED'
   )
-    add('name', '名称不能为空且不能包含 /')
+    add('name', '名称不能为空、不能包含 /，且不能使用 UNTITLED')
   const validUrl = (linkValue: string) => {
     try {
       const url = new URL(parseResourceLink(linkValue).url)

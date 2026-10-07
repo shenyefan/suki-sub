@@ -1,4 +1,6 @@
 import { setResourceContext } from '../store/resource-context'
+import { renameTokenTargets } from '../store/kv'
+import { writeServerEvent } from '../store/logs'
 import isEqual from 'lodash/isEqual.js'
 import { validateForSave } from '../core/preview-process'
 /**
@@ -14,7 +16,6 @@ import {
   deleteCollectionRow,
   getCollection,
   listCollections,
-  renameCollectionRefs,
   updateCollectionRow,
 } from '../store/d1'
 import { RequestInvalidError, ResourceNotFoundError } from '../core/errors'
@@ -25,12 +26,26 @@ function createPosition(settings: Record<string, unknown>): 'top' | 'bottom' {
   return settings['createItemPosition'] === 'top' ? 'top' : 'bottom'
 }
 
-function assertValidName(name: string) {
-  if (!name || /\//.test(name))
+function assertValidName(name: unknown): asserts name is string {
+  if (
+    typeof name !== 'string' ||
+    !name.trim() ||
+    name.includes('/') ||
+    name === 'UNTITLED'
+  )
     throw new RequestInvalidError(
       'INVALID_NAME',
-      `Collection name ${name} is invalid`,
+      '名称不能为空、不能包含 /，且不能使用 UNTITLED',
+      { field: 'name' },
     )
+}
+
+function duplicateName(name: string) {
+  return new RequestInvalidError(
+    'DUPLICATE_KEY',
+    `组合订阅名称“${name}”已存在，请使用其他名称`,
+    { field: 'name' },
+  )
 }
 
 app.get('/api/collections', async (c) =>
@@ -50,10 +65,7 @@ app.post('/api/collections', async (c) =>
       setResourceContext(c, 'collection', col)
       assertValidName(col.name)
       if (await getCollection(c.env.SUKI_SUB_DB, col.name)) {
-        throw new RequestInvalidError(
-          'DUPLICATE_KEY',
-          `Collection ${col.name} already exists.`,
-        )
+        throw duplicateName(col.name)
       }
       await validateForSave('collection', col)
       await createCollection(
@@ -101,12 +113,52 @@ app.patch('/api/collections/:name', async (c) =>
         name: patch.name ?? old.name,
       }
       assertValidName(merged.name)
+      if (
+        merged.name !== name &&
+        (await getCollection(c.env.SUKI_SUB_DB, merged.name))
+      )
+        throw duplicateName(merged.name)
+      if (merged.name !== name)
+        c.set(
+          'operationDetails' as never,
+          {
+            previousName: name,
+            resourceName: merged.name,
+            resourceDisplayName: merged.displayName,
+            renamed: true,
+          } as never,
+        )
       setResourceContext(c, 'collection', merged)
       c.set('operationUnchanged' as never, isEqual(old, merged) as never)
       await validateForSave('collection', merged)
-      if (name !== merged.name)
-        await renameCollectionRefs(c.env.SUKI_SUB_DB, name, merged.name)
-      await updateCollectionRow(c.env.SUKI_SUB_DB, name, merged, merged.name)
+      try {
+        await updateCollectionRow(c.env.SUKI_SUB_DB, name, merged, merged.name)
+      } catch (err) {
+        if (
+          /UNIQUE constraint failed/.test(
+            err instanceof Error ? err.message : String(err),
+          )
+        )
+          throw duplicateName(merged.name)
+        throw err
+      }
+      if (name !== merged.name) {
+        try {
+          await renameTokenTargets(
+            c.env.SUKI_SUB_CACHE,
+            'collection',
+            name,
+            merged.name,
+          )
+        } catch (err) {
+          writeServerEvent('warn', '名称已修改，但分享绑定更新失败', {
+            action: 'collection.update',
+            resourceName: merged.name,
+            previousName: name,
+            reason: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
       return c.json(merged)
     } catch (err) {
       return errorResponse(c, err)

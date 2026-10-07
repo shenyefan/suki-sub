@@ -1,4 +1,6 @@
 import { setResourceContext } from '../store/resource-context'
+import { renameTokenTargets } from '../store/kv'
+import { writeServerEvent } from '../store/logs'
 import isEqual from 'lodash/isEqual.js'
 import { validateForSave } from '../core/preview-process'
 /**
@@ -14,7 +16,6 @@ import {
   deleteSubscriptionRow,
   getSubscription,
   listSubscriptions,
-  renameSubscriptionRefs,
   replaceSubscriptions,
   updateSubscriptionRow,
 } from '../store/d1'
@@ -27,12 +28,26 @@ function createPosition(settings: Record<string, unknown>): 'top' | 'bottom' {
   return settings['createItemPosition'] === 'top' ? 'top' : 'bottom'
 }
 
-function assertValidName(name: string) {
-  if (!name || /\//.test(name))
+function assertValidName(name: unknown): asserts name is string {
+  if (
+    typeof name !== 'string' ||
+    !name.trim() ||
+    name.includes('/') ||
+    name === 'UNTITLED'
+  )
     throw new RequestInvalidError(
       'INVALID_NAME',
-      `Subscription name ${name} is invalid`,
+      '名称不能为空、不能包含 /，且不能使用 UNTITLED',
+      { field: 'name' },
     )
+}
+
+function duplicateName(name: string) {
+  return new RequestInvalidError(
+    'DUPLICATE_KEY',
+    `订阅名称“${name}”已存在，请使用其他名称`,
+    { field: 'name' },
+  )
 }
 
 app.get('/api/subs', async (c) =>
@@ -52,11 +67,7 @@ app.post('/api/subs', async (c) =>
       setResourceContext(c, 'sub', sub)
       assertValidName(sub.name)
       const existing = await getSubscription(c.env.SUKI_SUB_DB, sub.name)
-      if (existing)
-        throw new RequestInvalidError(
-          'DUPLICATE_KEY',
-          `Subscription ${sub.name} already exists.`,
-        )
+      if (existing) throw duplicateName(sub.name)
       await validateForSave('sub', sub)
       const position = createPosition(getEngineStore().settings)
       await createSubscription(c.env.SUKI_SUB_DB, sub, position)
@@ -119,14 +130,58 @@ app.patch('/api/subs/:name', async (c) =>
           `Subscription ${name} does not exist!`,
         )
       const merged = { ...old, ...patch }
-      if (!merged.name) merged.name = old.name
       assertValidName(merged.name)
+      if (
+        merged.name !== name &&
+        (await getSubscription(c.env.SUKI_SUB_DB, merged.name))
+      )
+        throw duplicateName(merged.name)
+      if (merged.name !== name)
+        c.set(
+          'operationDetails' as never,
+          {
+            previousName: name,
+            resourceName: merged.name,
+            resourceDisplayName: merged.displayName,
+            renamed: true,
+          } as never,
+        )
       setResourceContext(c, 'sub', merged)
       c.set('operationUnchanged' as never, isEqual(old, merged) as never)
       await validateForSave('sub', merged)
-      if (name !== merged.name)
-        await renameSubscriptionRefs(c.env.SUKI_SUB_DB, name, merged.name)
-      await updateSubscriptionRow(c.env.SUKI_SUB_DB, name, merged, merged.name)
+      try {
+        await updateSubscriptionRow(
+          c.env.SUKI_SUB_DB,
+          name,
+          merged,
+          merged.name,
+        )
+      } catch (err) {
+        if (
+          /UNIQUE constraint failed/.test(
+            err instanceof Error ? err.message : String(err),
+          )
+        )
+          throw duplicateName(merged.name)
+        throw err
+      }
+      if (name !== merged.name) {
+        try {
+          await renameTokenTargets(
+            c.env.SUKI_SUB_CACHE,
+            'sub',
+            name,
+            merged.name,
+          )
+        } catch (err) {
+          writeServerEvent('warn', '名称已修改，但分享绑定更新失败', {
+            action: 'sub.update',
+            resourceName: merged.name,
+            previousName: name,
+            reason: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
       return c.json(merged)
     } catch (err) {
       return errorResponse(c, err)

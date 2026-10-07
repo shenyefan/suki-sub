@@ -21,6 +21,8 @@ function logResponseError(
           reason: message,
         }
       : {}),
+    ...(c.get('operationDetails' as never) as
+      Record<string, unknown> | undefined),
     ...fields,
   })
 }

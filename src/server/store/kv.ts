@@ -64,6 +64,26 @@ export async function deleteToken(kv: KVNamespace, id: string): Promise<void> {
   await kvDelete(kv, `${KV_PREFIX.token}${id}`)
 }
 
+/** 重命名保留既有分享链接、有效期与使用次数；分页覆盖全部绑定。 */
+export async function renameTokenTargets(
+  kv: KVNamespace,
+  type: 'sub' | 'collection',
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  let cursor: string | undefined
+  do {
+    const page = await kv.list({ prefix: KV_PREFIX.token, cursor })
+    for (const key of page.keys) {
+      const token = await kvGet<TokenItem>(kv, key.name)
+      if (token?.type !== type || token.name !== oldName) continue
+      if (token.endAt != null && token.endAt <= Date.now()) continue
+      await saveToken(kv, { ...token, name: newName })
+    }
+    cursor = page.list_complete ? undefined : page.cursor
+  } while (cursor)
+}
+
 export async function listTokens(kv: KVNamespace): Promise<TokenItem[]> {
   const list = await kv.list<TokenItem>({ prefix: KV_PREFIX.token })
   // kv.list 的 metadata 不一定包含完整值,逐个读取(单用户量级小,可接受)

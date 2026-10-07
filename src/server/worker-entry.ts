@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-start/server'
 import apiApp from './app'
 import { runScheduledJobs } from './jobs/scheduler'
+import { notifyServerEvents } from './notifications/telegram'
 import { withServerLogs } from './store/logs'
 
 /** TanStack Start 的页面/SSR 请求处理(前端路由、静态资源、server functions) */
@@ -48,6 +49,7 @@ export default {
         env.SUKI_SUB_DB,
         () => runScheduledJobs(controller, env),
         () => ({ userName: '定时任务' }),
+        (entries) => notifyServerEvents(env, entries),
       ),
     )
   },

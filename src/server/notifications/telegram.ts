@@ -1,7 +1,13 @@
 import { BaseError, errorMessage } from '../core/errors'
-import { writeServerEvent } from '../store/logs'
+import { writeServerEvent, sanitizeLogValue } from '../store/logs'
 import { redactDiagnostic } from '../core/utils/diagnostics'
 import { LOG_ACTION_LABELS } from '#/shared/logs'
+import {
+  TELEGRAM_NOTIFICATIONS,
+  telegramMasterMode,
+  telegramCategoryMode,
+  telegramOperationCategory,
+} from '#/shared/telegram-notifications'
 import { getAllSettings } from '../store/d1'
 import type { ServerLog } from '../store/logs'
 import type { Settings, Subscription, Collection } from '#/shared/types'
@@ -94,118 +100,234 @@ export function telegramConfigurationState(
   }
 }
 
-const escapeMarkdown = (value: unknown, limit = 300) =>
-  Array.from(redactDiagnostic(String(value ?? '')))
-    .slice(0, limit)
-    .join('')
-    .replace(/[\\_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
 const failed = (entry: ServerLog) =>
   entry.level === 'error' || Number(entry.details?.httpStatus) >= 400
 
 const resourceKinds: Record<string, string> = {
   sub: '订阅',
-  collection: '集合',
+  collection: '组合订阅',
+  module: '脚本模块',
   share: '分享',
 }
-
+const fieldLabels: Record<string, string> = {
+  name: '名称',
+  url: '订阅链接',
+  content: '本地内容',
+  subscriptions: '组合成员',
+  process: '节点操作',
+  gistToken: '备份访问 Token',
+  gistBackupName: '备份名称',
+  syncPlatform: '备份平台',
+  createItemPosition: '新建位置',
+  telegramEnabled: '通知总范围',
+  telegramNotificationMode: '通知总范围',
+}
+Object.assign(
+  fieldLabels,
+  Object.fromEntries(
+    TELEGRAM_NOTIFICATIONS.map((item) => [item.key, item.label + '通知']),
+  ),
+)
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
-
-/** 动作代码转中文标签（与日志页同源），未收录的保留原值便于排查。 */
 const actionLabel = (action: unknown) => {
   const key = String(action ?? '')
-  return key ? (LOG_ACTION_LABELS[key] ?? key) : ''
+  return (
+    LOG_ACTION_LABELS[key] ??
+    (key.startsWith('processing.') ? '处理订阅' : '接口请求')
+  )
 }
 
-/** 不发送凭据、完整 URL、请求正文或 IP；来源失败详情折叠在同一条消息中。 */
+/** Telegram HTML 只接受转义后的文本；结构化原因也保留实际内容。 */
+const escapeTelegram = (value: unknown, limit = 300) => {
+  const text =
+    typeof value === 'object' && value !== null
+      ? JSON.stringify(sanitizeLogValue(value))
+      : String(value ?? '')
+  return Array.from(redactDiagnostic(text))
+    .slice(0, limit)
+    .join('')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** 明确谁在何时对哪个资源做了什么，错误附来源、操作与定位信息。 */
 export function formatTelegramEvent(entry: ServerLog): string {
-  const details = entry.details ?? {}
-  const resource =
-    details.resourceDisplayName ||
-    details.targetDisplayName ||
-    details.collection ||
-    details.subscription ||
-    details.resourceName
-  const problems: Record<string, unknown>[] = Array.isArray(details.failures)
-    ? details.failures
-    : Array.isArray(details.issues)
-      ? details.issues
-      : []
-  const level = failed(entry)
+  const d = entry.details ?? {}
+  const outcome = failed(entry)
     ? '失败'
     : entry.level === 'warn'
       ? '警告'
       : '成功'
-  const rows = [`*SUKI SUB · ${level}通知*`, '━'.repeat(14)]
-  const field = (label: string, value: string) => {
-    if (value) rows.push(`*${label}*：${value}`)
+  const action = d.renamed
+    ? '重命名' +
+      (resourceKinds[String(d.resourceKind ?? d.targetResourceKind)] ?? '订阅')
+    : actionLabel(d.action)
+  const rows = [`<b>SUKI SUB · ${escapeTelegram(action)}${outcome}</b>`]
+  const field = (label: string, value: unknown, limit = 300) => {
+    if (value != null && value !== '')
+      rows.push(`<b>${label}</b>：${escapeTelegram(value, limit)}`)
   }
-  field('事件', escapeMarkdown(entry.message, 160))
+  field('事件', entry.message, 200)
+  const name =
+    d.targetResourceName ?? d.resourceName ?? d.subscription ?? d.collection
+  const displayName = d.targetDisplayName ?? d.resourceDisplayName
   field(
     '资源',
     [
-      escapeMarkdown(resource, 120),
-      resourceKinds[
-        String(details.resourceKind ?? details.targetResourceKind ?? '')
-      ],
+      resourceKinds[String(d.targetResourceKind ?? d.resourceKind)],
+      displayName || name,
     ]
       .filter(Boolean)
       .join(' · '),
+    160,
   )
-  field('格式', escapeMarkdown(details.platform, 80))
+  if (name && displayName && name !== displayName) field('资源名称', name, 120)
+  if (d.previousName) field('名称变更', `${d.previousName} → ${name}`, 250)
   field(
-    '操作',
+    '执行者',
+    d.userName ||
+      (d.action === 'backup.scheduled'
+        ? '定时任务'
+        : d.action === 'subscription.download'
+          ? '订阅客户端'
+          : '未识别用户'),
+    100,
+  )
+  const time = new Date(entry.time)
+  if (!Number.isNaN(time.getTime()))
+    field(
+      '时间',
+      new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }).format(time) + '（北京时间）',
+    )
+  field('输出格式', d.platform, 80)
+  field(
+    '备份平台',
+    d.backupPlatform === 'gitlab'
+      ? 'GitLab Snippet'
+      : d.backupPlatform === 'gist'
+        ? 'GitHub Gist'
+        : undefined,
+  )
+  field('备份名称', d.backupName, 100)
+  field('备份文件', d.backupFile, 120)
+  if (d.subscriptionCount != null)
+    field(
+      '备份内容',
+      `${d.subscriptionCount} 个订阅、${d.collectionCount ?? 0} 个组合、${d.moduleCount ?? 0} 个脚本模块`,
+    )
+  if (Array.isArray(d.changedFields))
+    field(
+      '修改项',
+      d.changedFields.map((key: string) => fieldLabels[key] ?? key).join('、'),
+      400,
+    )
+  if (Array.isArray(d.notificationChanges)) {
+    const labels: Record<string, string> = {
+      off: '关闭',
+      errors: '仅异常',
+      all: '全部',
+    }
+    for (const item of d.notificationChanges as Record<string, unknown>[])
+      field(
+        '通知范围',
+        `${item.label}：${labels[String(item.before)] ?? item.before} → ${labels[String(item.after)] ?? item.after}`,
+      )
+  }
+  if (d.nodeCount != null) field('节点数量', d.nodeCount)
+  if (d.replaced != null) field('导入数量', d.replaced)
+  if (d.count != null) field('分享次数上限', d.count)
+  if (d.endAt) field('分享到期时间', new Date(Number(d.endAt)).toISOString())
+  if (failed(entry) && d.path) {
+    const path = String(d.path)
+      .replace(/^\/s\/.*/, '/s/:share')
+      .replace(/^\/api\/shares\/.*/, '/api/shares/:share')
+    field('请求', [d.method, path].filter(Boolean).join(' '), 200)
+  }
+  if (d.httpStatus) field('接口状态', `HTTP ${d.httpStatus}`)
+  if (d.status) field('上游状态', `HTTP ${d.status}`)
+  if (d.durationMs != null) field('耗时', formatDuration(Number(d.durationMs)))
+  field('错误代码', d.code, 100)
+  if (d.operatorName || d.operatorIndex != null)
+    field(
+      '出错操作',
+      [
+        d.operatorIndex != null ? `第 ${Number(d.operatorIndex) + 1} 项` : '',
+        d.operatorName,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    )
+  const position = (item: Record<string, unknown>) =>
     [
-      details.operatorIndex != null
-        ? `第 ${Number(details.operatorIndex) + 1} 项`
+      item.field
+        ? `字段：${fieldLabels[String(item.field)] ?? item.field}`
         : '',
-      escapeMarkdown(details.operatorName, 100),
+      item.operatorIndex != null
+        ? `操作第 ${Number(item.operatorIndex) + 1} 项`
+        : '',
+      item.configLine != null ? `配置第 ${item.configLine} 行` : '',
+      item.sourceLine != null ? `来源第 ${item.sourceLine} 行` : '',
+      item.scriptLine != null
+        ? `脚本第 ${item.scriptLine} 行${item.scriptColumn != null ? `第 ${item.scriptColumn} 列` : ''}`
+        : '',
     ]
       .filter(Boolean)
-      .join(' · '),
-  )
-  field('用户', escapeMarkdown(details.userName, 100))
-  field('动作', escapeMarkdown(actionLabel(details.action), 120))
-  const status = Number(details.httpStatus)
-  if (Number.isFinite(status) && status > 0) field('状态', `HTTP ${status}`)
-  const durationMs = Number(details.durationMs)
-  if (Number.isFinite(durationMs) && durationMs >= 0)
-    // formatDuration 的 toFixed 会产生小数点,MarkdownV2 中必须转义。
-    field('耗时', escapeMarkdown(formatDuration(durationMs), 24))
-  if (problems.length) field('来源失败', `${problems.length} 个`)
-  const diagnostic = [
-    details.reason ? escapeMarkdown(details.reason, 800) : '',
-    ...problems
-      .slice(0, 8)
-      .map(
-        (item: Record<string, unknown>) =>
-          `${escapeMarkdown(item.resourceDisplayName || item.subscription || item.source || item.resourceName, 120)}\n${escapeMarkdown(item.message, 400)}`,
-      ),
-    problems.length > 8
-      ? `另有 ${problems.length - 8} 个问题，详情见日志。`
-      : '',
-  ].filter(Boolean)
-  if (diagnostic.length) {
-    // MarkdownV2 可折叠引用块：首行 **>，其余行 >；未配对的 || 会让 Telegram 拒收整条消息。
-    // 按整行累计 2200 字符预算，避免截断转义序列并保持在 4096 上限内。
-    const lines: string[] = []
-    let used = 0
-    for (const line of diagnostic.join('\n\n').split('\n')) {
-      if (used + line.length > 2200) {
-        lines.push('…内容过长已截断，详情见日志')
-        break
-      }
-      lines.push(line)
-      used += line.length + 1
+      .join(' · ')
+  field('定位', position(d), 250)
+  if (failed(entry) || entry.level === 'warn')
+    field('原因', d.reason || d.message || entry.message, 500)
+  const problems = [
+    ...(Array.isArray(d.failures) ? d.failures : []),
+    ...(Array.isArray(d.issues) ? d.issues : []),
+    ...(Array.isArray(d.processingDetails) ? d.processingDetails : []),
+  ] as Record<string, unknown>[]
+  if (problems.length) {
+    rows.push('', `<b>异常详情（${problems.length} 项）</b>`)
+    for (const [index, item] of problems.slice(0, 6).entries()) {
+      const source =
+        item.resourceDisplayName ||
+        item.subscription ||
+        item.source ||
+        item.resourceName ||
+        item.operatorName ||
+        '当前资源'
+      rows.push(`${index + 1}. ${escapeTelegram(source, 120)}`)
+      const location = position(item)
+      if (location) rows.push(escapeTelegram(location, 200))
+      rows.push(
+        escapeTelegram(
+          item.reason || item.message || item.code || '详情见日志',
+          400,
+        ),
+      )
+      if (item.status) rows.push(`上游 HTTP ${escapeTelegram(item.status, 8)}`)
     }
-    rows.push(
-      '',
-      ...['诊断详情', ...lines].map(
-        (line, index) => `${index === 0 ? '**' : ''}>${line}`,
-      ),
-    )
+    if (problems.length > 6) rows.push(`其余 ${problems.length - 6} 项见日志`)
   }
-  return rows.join('\n')
+  field('请求编号', d.auditRequestId, 100)
+  // 按完整行控制消息预算，不截断 HTML 实体或标签。
+  const result: string[] = []
+  let length = 0
+  for (const row of rows) {
+    if (length + row.length > 3700) {
+      result.push('内容较长，完整原因与请求编号请查看日志页')
+      break
+    }
+    result.push(row)
+    length += row.length + 1
+  }
+  return result.join('\n')
 }
 
 export async function sendTelegramEvents(
@@ -224,7 +346,15 @@ export async function sendTelegramEvents(
   const config = parseTelegramConfig(env.SUKI_SUB_PUSH_SERVICE)
   if (!config) return 0
   // 一个请求只发送一条摘要，优先失败事件，避免来源/操作层重复通知。
-  const entry = candidates.find(failed) || candidates[candidates.length - 1]
+  const entry =
+    candidates.find(
+      (item) =>
+        failed(item) &&
+        telegramOperationCategory(String(item.details?.action ?? '')),
+    ) ||
+    candidates.find(failed) ||
+    candidates.find((item) => item.level === 'warn') ||
+    candidates[candidates.length - 1]
   const text = formatTelegramEvent(entry)
   let sent = 0
   const results = await Promise.allSettled(
@@ -243,7 +373,7 @@ export async function sendTelegramEvents(
               chat_id: target.chatId,
               message_thread_id: target.threadId,
               text,
-              parse_mode: 'MarkdownV2',
+              parse_mode: 'HTML',
               link_preview_options: { is_disabled: true },
               disable_notification: config.silent,
             }),
@@ -329,32 +459,6 @@ export async function sendTelegramEvents(
   return sent
 }
 
-/** 操作类通知的分类:action 前缀 → 对应的全局设置键。 */
-const OP_NOTIFY_SETTINGS = {
-  shares: 'telegramNotifyShareOps',
-  resources: 'telegramNotifyResourceOps',
-  settings: 'telegramNotifySettingsOps',
-} as const
-
-function classifyOpAction(
-  action: string,
-): keyof typeof OP_NOTIFY_SETTINGS | null {
-  if (action.startsWith('share.')) return 'shares'
-  if (
-    action.startsWith('sub.') ||
-    action.startsWith('collection.') ||
-    action.startsWith('module.')
-  )
-    return 'resources'
-  if (
-    action.startsWith('settings.') ||
-    action.startsWith('backup.') ||
-    action.startsWith('session.')
-  )
-    return 'settings'
-  return null
-}
-
 export async function notifyServerEvents(
   env: Env,
   entries: readonly ServerLog[],
@@ -368,30 +472,29 @@ export async function notifyServerEvents(
     // 设置表读取失败时退回资源级开关发送,通知不依赖设置表可用。
   }
   // 全局总开关:显式关闭时全部静默(未设置视为开启,保持既有行为)。
-  if (globalSettings.telegramEnabled === false) return
-  // 操作类请求(创建分享、增删改、设置/备份)按各自分类开关,成功与失败都推送;
+  const master = telegramMasterMode(globalSettings)
+  if (master === 'off') return
+  // 操作类请求按各自通知范围；总范围为仅异常时再过滤成功事件。
   // 其余带资源上下文的请求(订阅拉取/预览)按资源级开关;都不匹配时仅接口异常兜底。
-  let opCategory: keyof typeof OP_NOTIFY_SETTINGS | null = null
+  let opCategory: string | undefined
   for (const entry of entries) {
     const action = String(entry.details?.action ?? '')
-    opCategory = classifyOpAction(action)
+    opCategory = telegramOperationCategory(action)
     if (opCategory) break
   }
-  const switches: TelegramSwitches = opCategory
-    ? {
-        telegramEnabled:
-          globalSettings[OP_NOTIFY_SETTINGS[opCategory]] === true,
-        telegramNotifySuccess: true,
-      }
+  const mode = opCategory
+    ? telegramCategoryMode(globalSettings, opCategory)
     : resource
-      ? {
-          telegramEnabled: resource.telegramEnabled === true,
-          telegramNotifySuccess: resource.telegramNotifySuccess === true,
-        }
-      : {
-          telegramEnabled: globalSettings.telegramNotifySystemErrors === true,
-          telegramNotifySuccess: false,
-        }
+      ? resource.telegramEnabled === true
+        ? resource.telegramNotifySuccess === true
+          ? 'all'
+          : 'errors'
+        : 'off'
+      : telegramCategoryMode(globalSettings, 'telegramNotifySystemErrors')
+  const switches: TelegramSwitches = {
+    telegramEnabled: mode !== 'off',
+    telegramNotifySuccess: mode === 'all' && master === 'all',
+  }
   if (switches.telegramEnabled !== true) return
   try {
     await sendTelegramEvents(env, entries, switches)

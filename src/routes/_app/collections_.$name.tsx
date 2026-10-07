@@ -110,6 +110,11 @@ function CollectionEditorPage() {
     onSuccess: (saved) => {
       toast.success(isNew ? '组合已创建' : '组合已保存')
       void client.invalidateQueries({ queryKey: qk.collections })
+      const resource = saved as Collection
+      client.setQueryData(['collection', resource.name], resource)
+      if (resource.name === name)
+        void client.invalidateQueries({ queryKey: ['collection', name] })
+      void client.invalidateQueries({ queryKey: qk.tokens })
       void navigate({
         to: '/collections/$name',
         params: { name: (saved as Collection).name },
@@ -183,8 +188,6 @@ function CollectionEditorPage() {
                 aria-describedby="col-name-error"
                 value={form.name}
                 onChange={(e) => patch({ name: e.target.value })}
-                readOnly={!isNew}
-                aria-readonly={!isNew}
                 placeholder="唯一名称，不可包含 /"
               />
               <ValidationHint
