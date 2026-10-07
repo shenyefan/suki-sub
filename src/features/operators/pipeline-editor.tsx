@@ -561,9 +561,9 @@ export function PipelineEditor({
           onCloseAutoFocus={(event) => {
             if (previewFailed.current) event.preventDefault()
           }}
-          className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-4xl"
+          className="flex h-[85dvh] flex-col overflow-hidden sm:max-w-4xl"
         >
-          <DialogHeader>
+          <DialogHeader className="shrink-0">
             <DialogTitle>操作结果预览</DialogTitle>
             <DialogDescription>
               使用当前未保存内容，检查来源、节点操作和响应修改。
@@ -581,7 +581,7 @@ export function PipelineEditor({
           {previewResult && (
             <Tabs
               defaultValue="after"
-              className="min-h-0 gap-4 overflow-y-auto"
+              className="min-h-0 flex-1 gap-4 overflow-hidden"
             >
               <TabsList
                 aria-label="预览阶段"
@@ -590,7 +590,7 @@ export function PipelineEditor({
                 <TabsTrigger value="before">处理前</TabsTrigger>
                 <TabsTrigger value="after">处理后</TabsTrigger>
               </TabsList>
-              <div className="grid min-h-0 gap-4 sm:grid-cols-2">
+              <div className="grid min-h-0 flex-1 gap-4 overflow-hidden sm:grid-cols-2">
                 {(['before', 'after'] as const).map((key) => {
                   const value = previewResult[key]
                   const shown = Array.isArray(value)
@@ -601,7 +601,7 @@ export function PipelineEditor({
                       key={key}
                       value={key}
                       forceMount
-                      className="hidden min-w-0 content-start gap-2 data-[state=active]:grid sm:grid"
+                      className="hidden min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden data-[state=active]:grid sm:grid"
                     >
                       <span className="text-sm font-medium">
                         {key === 'before' ? '处理前' : '处理后'}
@@ -615,12 +615,12 @@ export function PipelineEditor({
                           key === 'before' ? '处理前结果' : '处理后结果'
                         }
                         readOnly
+                        fillHeight
                         value={
                           typeof shown === 'string'
                             ? shown
                             : JSON.stringify(shown, null, 2)
                         }
-                        className="min-h-64 sm:h-96"
                       />
                     </TabsContent>
                   )

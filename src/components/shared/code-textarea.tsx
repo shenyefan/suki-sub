@@ -21,6 +21,8 @@ export type CodeTextareaProps = Pick<
   value?: string
   onChange?: (value: string) => void
   language?: CodeLanguage
+  /** 填满父容器的固定高度，仅在编辑器内部滚动。 */
+  fillHeight?: boolean
   'data-validation-input'?: boolean
 }
 
@@ -28,13 +30,20 @@ const CodeEditor = lazy(() => import('./code-editor'))
 
 /** 大段内容统一使用代码编辑器；服务端与加载阶段保留可编辑的回退输入。 */
 export function CodeTextarea(props: CodeTextareaProps) {
-  const { language: _language, onChange, className, ...fallbackProps } = props
+  const {
+    language: _language,
+    fillHeight,
+    onChange,
+    className,
+    ...fallbackProps
+  } = props
   const fallback = (
     <Textarea
       {...fallbackProps}
       spellCheck={false}
       className={cn(
         'min-h-48 font-mono text-xs leading-relaxed field-sizing-normal',
+        fillHeight && 'h-full min-h-0 resize-none overscroll-contain',
         className,
       )}
       onChange={(event) => onChange?.(event.target.value)}

@@ -33,6 +33,7 @@ export default function CodeEditor({
   value = '',
   onChange,
   language = 'auto',
+  fillHeight = false,
   className,
   id,
   placeholder,
@@ -106,6 +107,7 @@ export default function CodeEditor({
       tabIndex={-1}
       className={cn(
         'code-editor relative min-h-48 min-w-0 overflow-hidden rounded-md border border-input bg-card text-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50',
+        fillHeight && 'h-full min-h-0 [&_.cm-scroller]:overscroll-contain',
         disabled && 'opacity-50',
         invalid && 'border-destructive',
         className,
@@ -115,8 +117,8 @@ export default function CodeEditor({
       theme={dark ? 'dark' : 'light'}
       extensions={extensions}
       height="100%"
-      minHeight="inherit"
-      maxHeight="32rem"
+      minHeight={fillHeight ? '0' : 'inherit'}
+      maxHeight={fillHeight ? '100%' : '32rem'}
       placeholder={placeholder}
       editable={!disabled && !readOnly}
       readOnly={readOnly || disabled}
