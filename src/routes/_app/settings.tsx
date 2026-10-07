@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Download, Save, Upload } from 'lucide-react'
+import { Download, Save, Upload, CloudUpload } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
@@ -94,6 +94,32 @@ function SettingsPage() {
     onError: (err) => toast.error(`保存失败:${err.message}`),
   })
 
+  const saveAndBackup = useMutation({
+    mutationFn: async () => {
+      await api.patch(ApiRoutes.settings, {
+        gistToken,
+        syncPlatform,
+        gistBackupName,
+      })
+      try {
+        await api.post(ApiRoutes.backupSync)
+      } catch (err) {
+        const reason =
+          err && typeof err === 'object' && 'reason' in err
+            ? String(err.reason)
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        throw new Error(`设置已保存，但备份失败：${reason}`)
+      }
+    },
+    onSuccess: () => toast.success('设置已保存，备份完成'),
+    onError: (err) => toast.error(err.message),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: qk.settings })
+    },
+  })
+
   const restore = useMutation({
     mutationFn: async (file: File) => {
       const payload = JSON.parse(await file.text())
@@ -107,6 +133,8 @@ function SettingsPage() {
     onError: (err) =>
       toast.error(`恢复失败:${err instanceof Error ? err.message : err}`),
   })
+
+  const savingSettings = saveSettings.isPending || saveAndBackup.isPending
 
   const [exporting, setExporting] = useState(false)
 
@@ -156,20 +184,33 @@ function SettingsPage() {
           title="Gist 同步"
           description="同步备份到 GitHub Gist 或 GitLab Snippet。"
           actions={
-            <Button
-              size="sm"
-              onClick={() =>
-                saveSettings.mutate({
-                  gistToken,
-                  syncPlatform,
-                  gistBackupName,
-                })
-              }
-              loading={saveSettings.isPending}
-            >
-              <Save aria-hidden />
-              保存
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() =>
+                  saveSettings.mutate({
+                    gistToken,
+                    syncPlatform,
+                    gistBackupName,
+                  })
+                }
+                loading={saveSettings.isPending}
+                disabled={saveAndBackup.isPending}
+              >
+                <Save aria-hidden />
+                保存
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!gistToken.trim() || saveSettings.isPending}
+                loading={saveAndBackup.isPending}
+                onClick={() => saveAndBackup.mutate()}
+              >
+                <CloudUpload aria-hidden />
+                保存并备份
+              </Button>
+            </div>
           }
         >
           <div className="grid items-start gap-4 sm:grid-cols-2">
@@ -178,6 +219,7 @@ function SettingsPage() {
               <Input
                 id="gist-token"
                 type="password"
+                disabled={savingSettings}
                 value={gistToken}
                 placeholder="ghp_… / glpat-…"
                 onChange={(e) => setGistToken(e.target.value)}
@@ -185,7 +227,11 @@ function SettingsPage() {
             </div>
             <div className="grid min-w-0 content-start gap-2">
               <Label>同步平台</Label>
-              <Select value={syncPlatform} onValueChange={setSyncPlatform}>
+              <Select
+                value={syncPlatform}
+                onValueChange={setSyncPlatform}
+                disabled={savingSettings}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -199,6 +245,7 @@ function SettingsPage() {
               <Label htmlFor="gist-backup-name">备份 Gist 名称</Label>
               <Input
                 id="gist-backup-name"
+                disabled={savingSettings}
                 value={gistBackupName}
                 onChange={(e) => setGistBackupName(e.target.value)}
                 placeholder="输入备份名称"
@@ -213,6 +260,7 @@ function SettingsPage() {
               <Label>新建条目位置</Label>
               <Select
                 value={createPosition}
+                disabled={savingSettings}
                 onValueChange={(v) => {
                   setCreatePosition(v)
                   saveSettings.mutate({ createItemPosition: v })
@@ -261,7 +309,7 @@ function SettingsPage() {
               label="Telegram 通知总开关"
               id="tg-master"
               checked={telegramMaster}
-              disabled={saveSettings.isPending}
+              disabled={savingSettings}
               onCheckedChange={(checked) =>
                 saveSettings.mutate({ telegramEnabled: checked })
               }
@@ -270,7 +318,7 @@ function SettingsPage() {
               label="分享操作通知"
               id="tg-share-ops"
               checked={settings.data?.['telegramNotifyShareOps'] === true}
-              disabled={!telegramMaster || saveSettings.isPending}
+              disabled={!telegramMaster || savingSettings}
               onCheckedChange={(checked) =>
                 saveSettings.mutate({ telegramNotifyShareOps: checked })
               }
@@ -279,7 +327,7 @@ function SettingsPage() {
               label="订阅与脚本变更通知"
               id="tg-resource-ops"
               checked={settings.data?.['telegramNotifyResourceOps'] === true}
-              disabled={!telegramMaster || saveSettings.isPending}
+              disabled={!telegramMaster || savingSettings}
               onCheckedChange={(checked) =>
                 saveSettings.mutate({ telegramNotifyResourceOps: checked })
               }
@@ -288,7 +336,7 @@ function SettingsPage() {
               label="设置与备份通知"
               id="tg-settings-ops"
               checked={settings.data?.['telegramNotifySettingsOps'] === true}
-              disabled={!telegramMaster || saveSettings.isPending}
+              disabled={!telegramMaster || savingSettings}
               onCheckedChange={(checked) =>
                 saveSettings.mutate({ telegramNotifySettingsOps: checked })
               }
@@ -297,7 +345,7 @@ function SettingsPage() {
               label="接口异常通知"
               id="tg-system-errors"
               checked={settings.data?.['telegramNotifySystemErrors'] === true}
-              disabled={!telegramMaster || saveSettings.isPending}
+              disabled={!telegramMaster || savingSettings}
               onCheckedChange={(checked) =>
                 saveSettings.mutate({ telegramNotifySystemErrors: checked })
               }

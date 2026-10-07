@@ -53,6 +53,7 @@ export const ApiRoutes = {
   // 工具
   env: '/api/env',
   storage: '/api/backup',
+  backupSync: '/api/backup/sync',
   preview: (kind: 'sub' | 'collection') => `/api/preview/${kind}`,
   proxyParse: '/api/parse/nodes',
   ruleParse: '/api/parse/rules',

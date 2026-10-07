@@ -37,6 +37,7 @@ import {
 } from '#/components/shared/sortable-list'
 import { CodeTextarea } from '#/components/shared/code-textarea'
 import { Button } from '#/components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '#/components/ui/tabs'
 import { Input } from '#/components/ui/input'
 import { Switch } from '#/components/ui/switch'
 import {
@@ -578,34 +579,54 @@ export function PipelineEditor({
             </div>
           )}
           {previewResult && (
-            <div className="grid min-h-0 gap-4 overflow-y-auto sm:grid-cols-2">
-              {(['before', 'after'] as const).map((key) => {
-                const value = previewResult[key]
-                const shown = Array.isArray(value) ? value.slice(0, 100) : value
-                return (
-                  <div key={key} className="grid min-w-0 content-start gap-2">
-                    <span className="text-sm font-medium">
-                      {key === 'before' ? '处理前' : '处理后'}
-                      {Array.isArray(value)
-                        ? ` · ${value.length} 个节点${value.length > 100 ? '（展示前 100 个）' : ''}`
-                        : ''}
-                    </span>
-                    <CodeTextarea
-                      aria-label={
-                        key === 'before' ? '处理前结果' : '处理后结果'
-                      }
-                      readOnly
-                      value={
-                        typeof shown === 'string'
-                          ? shown
-                          : JSON.stringify(shown, null, 2)
-                      }
-                      className="min-h-64 sm:h-96"
-                    />
-                  </div>
-                )
-              })}
-            </div>
+            <Tabs
+              defaultValue="after"
+              className="min-h-0 gap-4 overflow-y-auto"
+            >
+              <TabsList
+                aria-label="预览阶段"
+                className="w-full shrink-0 sm:hidden"
+              >
+                <TabsTrigger value="before">处理前</TabsTrigger>
+                <TabsTrigger value="after">处理后</TabsTrigger>
+              </TabsList>
+              <div className="grid min-h-0 gap-4 sm:grid-cols-2">
+                {(['before', 'after'] as const).map((key) => {
+                  const value = previewResult[key]
+                  const shown = Array.isArray(value)
+                    ? value.slice(0, 100)
+                    : value
+                  return (
+                    <TabsContent
+                      key={key}
+                      value={key}
+                      forceMount
+                      className="hidden min-w-0 content-start gap-2 data-[state=active]:grid sm:grid"
+                    >
+                      <span className="text-sm font-medium">
+                        {key === 'before' ? '处理前' : '处理后'}
+                        {Array.isArray(value)
+                          ? ` · ${value.length} 个节点${value.length > 100 ? '（展示前 100 个）' : ''}`
+                          : ''}
+                      </span>
+                      <CodeTextarea
+                        language={Array.isArray(value) ? 'json' : 'auto'}
+                        aria-label={
+                          key === 'before' ? '处理前结果' : '处理后结果'
+                        }
+                        readOnly
+                        value={
+                          typeof shown === 'string'
+                            ? shown
+                            : JSON.stringify(shown, null, 2)
+                        }
+                        className="min-h-64 sm:h-96"
+                      />
+                    </TabsContent>
+                  )
+                })}
+              </div>
+            </Tabs>
           )}
         </DialogContent>
       </Dialog>
@@ -619,11 +640,12 @@ export function PipelineEditor({
           </DialogHeader>
           <CodeTextarea
             aria-label="操作 JSON"
+            language="json"
             value={importText}
             placeholder="粘贴操作 JSON，导入后追加到当前列表"
             className="min-h-48"
-            onChange={(event) => {
-              setImportText(event.target.value)
+            onChange={(value) => {
+              setImportText(value)
               setImportError('')
             }}
           />

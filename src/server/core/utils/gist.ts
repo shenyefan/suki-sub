@@ -6,6 +6,28 @@ import { SETTINGS_KEY } from '#/server/core/constants'
 
 const DEFAULT_GITHUB_API_URL = 'https://api.github.com'
 
+interface GistOptions {
+  token: string
+  key: string
+  syncPlatform?: 'gist' | 'gitlab'
+}
+
+type GistFiles = Record<string, { content: string | null }>
+
+function validateGistFiles(input: unknown): void {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.values(input).some((file: unknown) => {
+      if (!file || typeof file !== 'object') return true
+      const content = (file as Record<string, unknown>).content
+      return content !== null && typeof content !== 'string'
+    })
+  )
+    throw new Error('备份文件必须是以文件名为键、包含 content 的对象集合')
+}
+
 function HTTP(defaultOptions: any = { baseURL: '' }) {
   const methods = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']
   const URL_REGEX =
@@ -119,7 +141,7 @@ export default class Gist {
   syncPlatform: any
   _requestQueue: Promise<any>
 
-  constructor({ token, key, syncPlatform }: any) {
+  constructor({ token, key, syncPlatform }: GistOptions) {
     const { githubApiTimeout, githubProxy, githubApiUrl } = ($.read(
       SETTINGS_KEY,
     ) || {}) as any
@@ -156,6 +178,7 @@ export default class Gist {
     } else {
       this.headers = {
         Authorization: `token ${token}`,
+        'Content-Type': 'application/json',
         'User-Agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.141 Safari/537.36',
       }
@@ -227,14 +250,15 @@ export default class Gist {
     }
   }
 
-  async upload(input: any, options = {} as any) {
+  async upload(input: GistFiles, options = {} as any) {
+    validateGistFiles(input)
     if (Object.keys(input).length === 0) {
       return Promise.reject('未提供需上传的文件')
     }
 
     const gist = await this.locate()
 
-    let files = input
+    let files: any = input
     const emptyFileFallback = options.emptyFileFallback
     const hasEmptyFileFallback = Boolean(emptyFileFallback?.filename)
     const uploadMeta: any = {}

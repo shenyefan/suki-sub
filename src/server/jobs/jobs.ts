@@ -41,26 +41,28 @@ export async function gistBackup(env: Env): Promise<JobResult> {
   const store = await loadJobStore(env)
   return runWithEngineStore(store, async () => {
     try {
+      const name =
+        String(store.settings['gistBackupName'] ?? '').trim() ||
+        'suki-sub-backup'
+      const token = String(store.settings['gistToken'] ?? '').trim()
+      if (!token) throw new Error('请先配置备份访问 Token')
       const gist = new Gist({
-        token: String(store.settings['gistToken'] ?? ''),
+        token,
+        key: name,
+        syncPlatform:
+          store.settings['syncPlatform'] === 'gitlab' ? 'gitlab' : 'gist',
       })
-      const db = env.SUKI_SUB_DB
-      const [subs, collections, settings] = await Promise.all([
-        listSubscriptions(db),
-        listCollections(db),
-        getAllSettings(db),
-      ])
+      const { subs, collections, modules, settings } = store
       const content = JSON.stringify(
         {
           version: '1',
           exportedAt: new Date().toISOString(),
-          data: { subs, collections, settings },
+          data: { subs, collections, modules, settings },
         },
         null,
         2,
       )
-      const name = String(store.settings['gistBackupName'] ?? 'suki-sub-backup')
-      await gist.upload(name, { [`${name}.json`]: { content } })
+      await gist.upload({ [`${name}.json`]: { content } })
       return { job: 'gist-backup', ok: true }
     } catch (err) {
       return {

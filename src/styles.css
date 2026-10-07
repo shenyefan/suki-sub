@@ -174,6 +174,33 @@
 }
 
 /* Shared editing rhythm: aligned labels, bounded fields and clear sections. */
+/* 编辑器库会注入未分层样式，这些外观规则也保持未分层以应用 Geist 令牌。 */
+.code-editor .cm-editor {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.code-editor .cm-scroller {
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+
+.code-editor .cm-gutters,
+.code-editor .cm-panels {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border-color: var(--border);
+}
+
+.code-editor .cm-activeLine,
+.code-editor .cm-activeLineGutter {
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.code-editor .cm-focused {
+  outline: none;
+}
+
 @layer components {
   .editor-section {
     @apply grid min-w-0 items-start gap-4 rounded-lg border bg-card p-4;

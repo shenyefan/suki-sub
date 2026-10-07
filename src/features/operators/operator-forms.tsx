@@ -236,11 +236,12 @@ function LinesField({
     <Row label={label} htmlFor={id}>
       <CodeTextarea
         id={id}
+        language="text"
         value={text}
         placeholder={placeholder ?? '每行输入一个正则表达式'}
-        onChange={(event) => {
-          setText(event.target.value)
-          onChange(event.target.value.split('\n').filter((line) => line.trim()))
+        onChange={(nextValue) => {
+          setText(nextValue)
+          onChange(nextValue.split('\n').filter((line) => line.trim()))
         }}
       />
     </Row>
@@ -469,7 +470,6 @@ function ScriptForm({
   const issues = useOperatorIssues()
   const isLink = (args.mode ?? 'link') === 'link'
   const parsed = parseScriptLink(isLink ? (args.content ?? '') : '')
-  const ScriptContent = isLink ? Input : CodeTextarea
   const parameters = isLink ? parsed.arguments : (args.arguments ?? {})
   const [draftKey, setDraftKey] = useState('')
   const [draftValue, setDraftValue] = useState('')
@@ -513,22 +513,31 @@ function ScriptForm({
         </Select>
       </div>
       <div className="grid gap-1.5">
-        <ScriptContent
-          id={`${prefix}-content`}
-          data-validation-input
-          aria-invalid={issues.length > 0}
-          aria-describedby={`${prefix}-content-error`}
-          className={isLink ? 'font-mono text-xs' : 'min-h-48'}
-          value={args.content ?? ''}
-          placeholder={
-            isLink
-              ? '远程脚本 URL；#key=value 附加参数，#noCache 禁用缓存'
-              : `function ${functionName}(input) {\n  // 在这里编写脚本\n  return input\n}`
-          }
-          onChange={(event) =>
-            onChange({ ...args, content: event.target.value })
-          }
-        />
+        {isLink ? (
+          <Input
+            id={`${prefix}-content`}
+            data-validation-input
+            aria-invalid={issues.length > 0}
+            aria-describedby={`${prefix}-content-error`}
+            className="font-mono text-xs"
+            value={args.content ?? ''}
+            placeholder="远程脚本 URL；#key=value 附加参数，#noCache 禁用缓存"
+            onChange={(event) =>
+              onChange({ ...args, content: event.target.value })
+            }
+          />
+        ) : (
+          <CodeTextarea
+            id={`${prefix}-content`}
+            data-validation-input
+            aria-invalid={issues.length > 0}
+            aria-describedby={`${prefix}-content-error`}
+            language="javascript"
+            value={args.content ?? ''}
+            placeholder={`function ${functionName}(input) {\n  // 在这里编写脚本\n  return input\n}`}
+            onChange={(value) => onChange({ ...args, content: value })}
+          />
+        )}
         <ValidationHint id={`${prefix}-content-error`} issues={issues} />
       </div>
       {isLink && (
@@ -735,9 +744,10 @@ function ResolveDomainForm({
           <Row label="DNS 地址" htmlFor={`${prefix}-rd-url`}>
             <CodeTextarea
               id={`${prefix}-rd-url`}
+              language="text"
               className="min-h-28"
               value={args.url ?? ''}
-              onChange={(e) => onChange({ ...args, url: e.target.value })}
+              onChange={(value) => onChange({ ...args, url: value })}
               placeholder="每行一个 DoH 地址，如 https://dns.google/dns-query"
             />
           </Row>

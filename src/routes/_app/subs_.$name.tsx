@@ -325,7 +325,7 @@ function SubEditorPage() {
                     aria-describedby="sub-content-error"
                     className="min-h-40"
                     value={form.content ?? ''}
-                    onChange={(e) => patch({ content: e.target.value })}
+                    onChange={(value) => patch({ content: value })}
                     placeholder="粘贴本地订阅内容或节点链接"
                   />
                   <ValidationHint
@@ -373,13 +373,14 @@ function SubEditorPage() {
                 >
                   <CodeTextarea
                     id="sub-url"
+                    language="text"
                     aria-invalid={validation.issues.some(
                       (issue) => issue.field === 'url',
                     )}
                     aria-describedby="sub-url-error"
                     className="min-h-24"
                     value={form.url ?? ''}
-                    onChange={(e) => patch({ url: e.target.value })}
+                    onChange={(value) => patch({ url: value })}
                     placeholder="粘贴订阅链接，每行一个 https://…"
                   />
                   <ValidationHint

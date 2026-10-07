@@ -100,6 +100,7 @@ export const LOG_ACTION_LABELS: Record<string, string> = {
   'backup.export': '导出备份',
   'backup.restore': '恢复备份',
   'backup.scheduled': '定时备份',
+  'backup.manual': '手动备份',
   'settings.update': '保存设置',
   'processing.failure': '处理异常',
   'processing.warning': '处理提醒',

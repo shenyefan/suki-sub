@@ -1,4 +1,5 @@
 import type { Context } from 'hono'
+import { ApiRoutes } from '#/shared/api-contract'
 import {
   discardRequestLogs,
   hasRecordedFailure,
@@ -25,6 +26,8 @@ export function logOperation(method: string, path: string): Operation | null {
     return { action: 'session.login', label: '登录' }
   if (path === '/auth/logout')
     return { action: 'session.logout', label: '退出登录' }
+  if (path === ApiRoutes.backupSync && method === 'POST')
+    return { action: 'backup.manual', label: '手动备份' }
   if (path === '/api/backup' && ['GET', 'POST'].includes(method))
     return {
       action: method === 'GET' ? 'backup.export' : 'backup.restore',

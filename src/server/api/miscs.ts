@@ -6,7 +6,9 @@ import { RequestInvalidError } from '../core/errors'
  */
 import { Hono } from 'hono'
 import type { Collection, ModuleItem, Subscription } from '#/shared/types'
-import { errorResponse } from './http'
+import { errorResponse, failureResponse } from './http'
+import { gistBackup } from '../jobs/jobs'
+import { ApiRoutes } from '#/shared/api-contract'
 import { withApiStore } from '../store/bootstrap'
 import {
   getAllSettings,
@@ -40,6 +42,20 @@ export const backendEnv = (): BackendEnv => ({
 })
 
 app.get('/api/env', (c) => c.json(backendEnv()))
+
+/** 使用已保存的设置手动上传全量备份，与定时任务共用同一实现。 */
+app.post(ApiRoutes.backupSync, async (c) => {
+  try {
+    const result = await gistBackup(c.env)
+    if (!result.ok)
+      return failureResponse(c, 'BACKUP_FAILED', '备份失败', 502, {
+        reason: result.detail,
+      })
+    return c.json({ backedUp: true })
+  } catch (err) {
+    return errorResponse(c, err)
+  }
+})
 
 /** 全量导出 */
 app.get('/api/backup', async (c) =>
