@@ -10,6 +10,7 @@ import { errorResponse, failureResponse } from './http'
 import { gistBackup } from '../jobs/jobs'
 import { ApiRoutes } from '#/shared/api-contract'
 import { withApiStore } from '../store/bootstrap'
+import { settingsForBackup, settingsForRestore } from '../store/backup-settings'
 import {
   getAllSettings,
   listCollections,
@@ -73,7 +74,12 @@ app.get('/api/backup', async (c) =>
       return c.json({
         version: '1',
         exportedAt: new Date().toISOString(),
-        data: { subs, collections, modules, settings },
+        data: {
+          subs,
+          collections,
+          modules,
+          settings: settingsForBackup(settings),
+        },
       })
     } catch (err) {
       return errorResponse(c, err)
@@ -94,13 +100,22 @@ app.post('/api/backup', async (c) =>
             `备份中的 ${key} 必须是数组`,
           )
       }
+      if (
+        data.settings != null &&
+        (typeof data.settings !== 'object' || Array.isArray(data.settings))
+      )
+        throw new RequestInvalidError('INVALID_BODY', '备份中的设置必须是对象')
+      const settings =
+        data.settings == null
+          ? getEngineStore().settings
+          : settingsForRestore(data.settings, getEngineStore().settings)
       await runWithEngineStore(
         {
           ...getEngineStore(),
           subs: data.subs ?? [],
           collections: data.collections ?? [],
           modules: data.modules ?? [],
-          settings: data.settings ?? getEngineStore().settings,
+          settings,
         },
         async () => {
           for (const sub of data.subs ?? []) await validateForSave('sub', sub)
@@ -112,7 +127,7 @@ app.post('/api/backup', async (c) =>
       await replaceSubscriptions(db, data.subs ?? [])
       await replaceCollections(db, data.collections ?? [])
       await replaceModules(db, data.modules ?? [])
-      if (data.settings) await replaceAllSettings(db, data.settings)
+      if (data.settings != null) await replaceAllSettings(db, settings)
       return c.json({ restored: true })
     } catch (err) {
       return errorResponse(c, err)

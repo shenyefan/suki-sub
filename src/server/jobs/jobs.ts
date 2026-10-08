@@ -5,6 +5,7 @@
 import Gist from '../core/utils/gist'
 import { runWithEngineStore } from '../store/engine-store'
 import type { EngineStore } from '../store/engine-store'
+import { settingsForBackup } from '../store/backup-settings'
 import {
   getAllSettings,
   listCollections,
@@ -58,7 +59,12 @@ export async function gistBackup(env: Env): Promise<JobResult> {
         {
           version: '1',
           exportedAt: new Date().toISOString(),
-          data: { subs, collections, modules, settings },
+          data: {
+            subs,
+            collections,
+            modules,
+            settings: settingsForBackup(settings),
+          },
         },
         null,
         2,
