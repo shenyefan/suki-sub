@@ -4,6 +4,8 @@ OIDC_ISSUER=https://auth.syf.sh
 OIDC_AUDIENCE=your-client-id
 # 机密客户端的 client secret;公共客户端(PKCE)留空或省略
 OIDC_CLIENT_SECRET=
+# 邮箱白名单(必填)：多个邮箱用逗号分隔，忽略大小写；留空拒绝访问
+OIDC_EMAIL_WHITELIST=you@example.com,another@example.com
 
 # Telegram 通知（可选）。启用开关在每条订阅或组合订阅的编辑页。
 # 格式：telegram://Token@telegram?chats=会话ID。

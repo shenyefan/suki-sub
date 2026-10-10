@@ -19,6 +19,7 @@ import { verifyAccessToken, verifyIdToken, verifyUserInfoToken } from './oidc'
 import { failureResponse } from '../api/http'
 import { discover } from './discovery'
 import { setAuditActor } from '../store/request-audit'
+import { isEmailAllowed, parseEmailWhitelist } from './email-whitelist'
 
 const SESSION_COOKIE = 'su_at'
 const REFRESH_COOKIE = 'su_rt'
@@ -26,6 +27,12 @@ const USER_COOKIE = 'su_user'
 const ID_COOKIE = 'su_id'
 const FLOW_COOKIE = 'su_auth'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 30
+
+function clearSessionCookies(c: { req: { url: string } }) {
+  for (const name of [SESSION_COOKIE, REFRESH_COOKIE, USER_COOKIE, ID_COOKIE]) {
+    deleteCookie(c as never, name, { path: '/' })
+  }
+}
 
 function b64url(bytes: Uint8Array): string {
   let bin = ''
@@ -231,6 +238,8 @@ export interface LoginEnv {
   OIDC_AUDIENCE?: string
   /** 机密客户端的 secret;公共客户端(PKCE)省略 */
   OIDC_CLIENT_SECRET?: string
+  /** 可访问管理面板的邮箱白名单；未配置或为空时拒绝访问。 */
+  OIDC_EMAIL_WHITELIST?: string
 }
 
 export async function readSession(
@@ -238,6 +247,11 @@ export async function readSession(
   allowRefresh = true,
 ): Promise<SessionStatus> {
   const { OIDC_ISSUER, OIDC_AUDIENCE, OIDC_CLIENT_SECRET } = c.env
+  const whitelist = parseEmailWhitelist(c.env.OIDC_EMAIL_WHITELIST)
+  if (!whitelist.size) {
+    clearSessionCookies(c)
+    return { authenticated: false }
+  }
   if (!OIDC_ISSUER || !OIDC_AUDIENCE) return { authenticated: false }
   const accessToken = getCookie(c as never, SESSION_COOKIE)
   const idToken = getCookie(c as never, ID_COOKIE)
@@ -261,6 +275,10 @@ export async function readSession(
           accessToken,
           identity,
         )
+        if (!isEmailAllowed(whitelist, user.email)) {
+          clearSessionCookies(c)
+          return { authenticated: false }
+        }
         writeUserCookie(c, user)
         return { authenticated: true, user }
       } catch {
@@ -304,6 +322,10 @@ export async function readSession(
       tokens.access_token,
       claims,
     )
+    if (!isEmailAllowed(whitelist, user.email)) {
+      clearSessionCookies(c)
+      return { authenticated: false }
+    }
     writeSessionCookies(c, tokens)
     writeUserCookie(c, user)
     return { authenticated: true, user }
@@ -321,6 +343,16 @@ export function oidcMiddleware() {
     const { OIDC_ISSUER, OIDC_AUDIENCE } = c.env
     if (!OIDC_ISSUER || !OIDC_AUDIENCE) {
       return failureResponse(c, 'OIDC_NOT_CONFIGURED', '登录服务未配置', 503)
+    }
+    const whitelist = parseEmailWhitelist(c.env.OIDC_EMAIL_WHITELIST)
+    if (!whitelist.size) {
+      clearSessionCookies(c)
+      return failureResponse(
+        c,
+        'OIDC_EMAIL_WHITELIST_NOT_CONFIGURED',
+        '邮箱白名单未配置，请设置 OIDC_EMAIL_WHITELIST',
+        503,
+      )
     }
     const auth = c.req.header('authorization') ?? ''
     const token = auth.startsWith('Bearer ')
@@ -356,7 +388,22 @@ export function oidcMiddleware() {
         /* 已验证访问凭据，显示信息回退到其声明。 */
       }
     }
-    setAuditActor(c, identity)
+    let user
+    try {
+      user = await fetchUserSummary(OIDC_ISSUER, OIDC_AUDIENCE, token, identity)
+    } catch {
+      return failureResponse(c, 'INVALID_IDENTITY', '无法验证用户邮箱', 401)
+    }
+    if (!isEmailAllowed(whitelist, user.email)) {
+      if (!auth.startsWith('Bearer ')) clearSessionCookies(c)
+      return failureResponse(
+        c,
+        'OIDC_EMAIL_NOT_ALLOWED',
+        '当前账号邮箱不在访问白名单中',
+        403,
+      )
+    }
+    setAuditActor(c, user)
     await next()
   }
 }
@@ -368,6 +415,14 @@ app.get('/auth/login', async (c) => {
   const url = new URL(c.req.url)
   if (!OIDC_ISSUER || !OIDC_AUDIENCE) {
     return failureResponse(c, 'OIDC_NOT_CONFIGURED', '登录服务未配置', 503)
+  }
+  if (!parseEmailWhitelist(c.env.OIDC_EMAIL_WHITELIST).size) {
+    return failureResponse(
+      c,
+      'OIDC_EMAIL_WHITELIST_NOT_CONFIGURED',
+      '邮箱白名单未配置，请设置 OIDC_EMAIL_WHITELIST',
+      503,
+    )
   }
   const doc = await discover(OIDC_ISSUER)
   if (!doc.authorization_endpoint) {
@@ -409,6 +464,16 @@ app.get('/auth/callback', async (c) => {
       'OIDC_NOT_CONFIGURED',
       'Set OIDC_ISSUER and OIDC_AUDIENCE vars to enable login.',
     )
+  const whitelist = parseEmailWhitelist(c.env.OIDC_EMAIL_WHITELIST)
+  if (!whitelist.size) {
+    clearSessionCookies(c)
+    return failureResponse(
+      c,
+      'OIDC_EMAIL_WHITELIST_NOT_CONFIGURED',
+      '邮箱白名单未配置，请设置 OIDC_EMAIL_WHITELIST',
+      503,
+    )
+  }
 
   const error = url.searchParams.get('error')
   if (error)
@@ -483,6 +548,15 @@ app.get('/auth/callback', async (c) => {
       tokens.access_token,
       claims,
     )
+    if (!isEmailAllowed(whitelist, user.email)) {
+      clearSessionCookies(c)
+      return failureResponse(
+        c,
+        'OIDC_EMAIL_NOT_ALLOWED',
+        '当前账号邮箱不在访问白名单中',
+        403,
+      )
+    }
     writeSessionCookies(c, tokens)
     writeUserCookie(c, user)
     setAuditActor(c, user)
@@ -496,15 +570,8 @@ app.get('/auth/logout', async (c) => {
   const session = await readSession(c, false)
   if (session.user) setAuditActor(c, session.user)
   const idToken = getCookie(c, ID_COOKIE)
-  for (const name of [
-    SESSION_COOKIE,
-    REFRESH_COOKIE,
-    USER_COOKIE,
-    ID_COOKIE,
-    FLOW_COOKIE,
-  ]) {
-    deleteCookie(c, name, { path: '/' })
-  }
+  clearSessionCookies(c)
+  deleteCookie(c, FLOW_COOKIE, { path: '/' })
   if (c.env.OIDC_ISSUER) {
     try {
       const doc = await discover(c.env.OIDC_ISSUER)
