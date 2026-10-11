@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link2, Plus, Share2, Trash2 } from 'lucide-react'
+import { Link2, Plus, QrCode, Share2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
@@ -14,6 +14,7 @@ import { api, copyToClipboard, shareUrl } from '#/lib/api'
 import { useTokens, useSubs, useCollections } from '#/lib/queries'
 import { cacheToken, removeCachedToken } from '#/lib/query-cache'
 import { resourceLabel } from '#/lib/resource-display'
+import { ShareLinkDialog } from '#/components/shared/share-link-dialog'
 import { ResourceIdentity } from '#/components/shared/resource-identity'
 import { formatDateTime } from '#/lib/format'
 import { PageHeader } from '#/components/shared/page-header'
@@ -43,6 +44,18 @@ import {
 
 export const Route = createFileRoute('/_app/shares')({
   component: TokensPage,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { share?: string; platform?: string } => ({
+    share:
+      typeof search.share === 'string' && search.share
+        ? search.share
+        : undefined,
+    platform:
+      typeof search.platform === 'string' && search.platform
+        ? search.platform
+        : undefined,
+  }),
 })
 
 const TYPE_LABELS: Record<string, string> = {
@@ -66,9 +79,11 @@ function tokenLink(token: TokenItem): string | null {
 function CreateTokenDialog({
   open,
   onOpenChange,
+  onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onCreated: (token: TokenItem) => void
 }) {
   const client = useQueryClient()
   const subs = useSubs()
@@ -108,14 +123,11 @@ function CreateTokenDialog({
     },
     onSuccess: async (token) => {
       await cacheToken(client, token)
-      const link = tokenLink(token)
-      const copied = link && (await copyToClipboard(link))
-      toast.success(
-        copied ? '分享链接已创建并复制' : '分享已创建，可在列表中复制链接',
-      )
+      toast.success('分享已创建')
       onOpenChange(false)
       setSelection('')
       setCount('')
+      onCreated(token)
     },
     onError: (err) => toast.error(`创建失败:${err.message}`),
   })
@@ -211,6 +223,11 @@ function CreateTokenDialog({
 }
 
 function TokensPage() {
+  const { share, platform } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const showLink = (id: string) => {
+    void navigate({ search: { share: id } })
+  }
   const subs = useSubs()
   const collections = useCollections()
   const tokens = useTokens()
@@ -317,6 +334,12 @@ function TokensPage() {
                             }
                           },
                         },
+                        {
+                          key: 'qr-code',
+                          label: '查看二维码',
+                          icon: QrCode,
+                          onClick: () => showLink(token.id),
+                        },
                       ]
                     : []),
                   {
@@ -334,7 +357,18 @@ function TokensPage() {
         </ul>
       )}
 
-      <CreateTokenDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateTokenDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(token) => showLink(token.id)}
+      />
+      <ShareLinkDialog
+        shareId={share}
+        platform={platform}
+        onOpenChange={(open) => {
+          if (!open) void navigate({ search: {}, replace: true })
+        }}
+      />
       <ConfirmDialog
         open={deleteId != null}
         onOpenChange={(open) => {

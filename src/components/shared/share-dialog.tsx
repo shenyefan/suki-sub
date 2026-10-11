@@ -1,13 +1,14 @@
 /**
- * 分享弹窗:为资源创建只读 token 并复制下载/原始内容链接。
+ * 分享弹窗:创建分享后跳转到分享页展示链接与二维码。
  */
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
 import type { TokenItem } from '#/shared/types'
-import { api, copyToClipboard, shareUrl } from '#/lib/api'
+import { api } from '#/lib/api'
 import { cacheToken } from '#/lib/query-cache'
 import { resourceLabel } from '#/lib/resource-display'
 import { ResourceIdentity } from './resource-identity'
@@ -69,6 +70,7 @@ export function ShareDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const subs = useSubs()
   const collections = useCollections()
@@ -93,15 +95,15 @@ export function ShareDialog({
       if (count && Number.isFinite(n) && n > 0) body.count = n
       const token = await api.post<TokenItem>(ApiRoutes.shares, body)
       await cacheToken(queryClient, token)
-      const link = shareUrl(
-        token.id,
-        platform === 'auto' ? undefined : platform,
-      )
-      if (await copyToClipboard(link)) {
-        toast.success('分享链接已创建并复制')
-      } else {
-        toast.success('分享已创建，可在分享页复制链接')
-      }
+      toast.success('分享已创建')
+      onOpenChange(false)
+      await navigate({
+        to: '/shares',
+        search: {
+          share: token.id,
+          platform: platform === 'auto' ? undefined : platform,
+        },
+      })
     } catch (err) {
       toast.error(
         `创建失败:${err instanceof Error ? err.message : String(err)}`,
@@ -183,7 +185,7 @@ export function ShareDialog({
         </div>
 
         <Button onClick={() => void createToken()} loading={creating}>
-          {creating ? '创建中…' : '创建分享并复制链接'}
+          {creating ? '创建中…' : '创建分享'}
         </Button>
       </DialogContent>
     </Dialog>
