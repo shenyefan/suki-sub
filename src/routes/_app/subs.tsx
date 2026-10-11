@@ -22,7 +22,14 @@ import { ApiRoutes } from '#/shared/api-contract'
 import type { Collection, Subscription } from '#/shared/types'
 import { resourceLabel } from '#/lib/resource-display'
 import { api } from '#/lib/api'
-import { qk, useCollections, useSortMutation, useSubs } from '#/lib/queries'
+import {
+  qk,
+  refreshFlow,
+  useCollections,
+  useSortMutation,
+  useSubs,
+} from '#/lib/queries'
+import { cacheResource, removeCachedResource } from '#/lib/query-cache'
 import { PageHeader } from '#/components/shared/page-header'
 import { EmptyState } from '#/components/shared/empty-state'
 import { ConfirmDialog } from '#/components/shared/confirm-dialog'
@@ -107,11 +114,10 @@ function SubsPage() {
           : ApiRoutes.collection(target.name)
       return api.del(url)
     },
-    onSuccess: () => {
+    onSuccess: async (_, target) => {
+      await removeCachedResource(client, target.kind, target.name)
       toast.success('已删除')
       setDeleteTarget(null)
-      void client.invalidateQueries({ queryKey: qk.subs })
-      void client.invalidateQueries({ queryKey: qk.collections })
     },
     onError: (err) => toast.error(`删除失败:${err.message}`),
   })
@@ -142,7 +148,8 @@ function SubsPage() {
       let fail = 0
       for (const item of toCreate.subs as { name?: string }[]) {
         try {
-          await api.post(ApiRoutes.subs, item)
+          const saved = await api.post<Subscription>(ApiRoutes.subs, item)
+          await cacheResource(client, 'sub', saved)
           ok++
         } catch {
           fail++
@@ -150,7 +157,8 @@ function SubsPage() {
       }
       for (const item of toCreate.collections as { name?: string }[]) {
         try {
-          await api.post(ApiRoutes.collections, item)
+          const saved = await api.post<Collection>(ApiRoutes.collections, item)
+          await cacheResource(client, 'collection', saved)
           ok++
         } catch {
           fail++
@@ -186,12 +194,11 @@ function SubsPage() {
         target.kind === 'sub'
           ? ApiRoutes.subClone(target.name)
           : ApiRoutes.collectionClone(target.name)
-      return api.post<{ name: string }>(url)
+      return api.post<Subscription | Collection>(url)
     },
-    onSuccess: (clone) => {
+    onSuccess: async (clone, target) => {
+      await cacheResource(client, target.kind, clone)
       toast.success(`已克隆为 ${resourceLabel(clone)}`)
-      void client.invalidateQueries({ queryKey: qk.subs })
-      void client.invalidateQueries({ queryKey: qk.collections })
     },
     onError: (err) => toast.error(`克隆失败:${err.message}`),
   })
@@ -376,10 +383,14 @@ function SubsPage() {
                         key: 'refresh',
                         label: '刷新流量',
                         icon: RefreshCw,
-                        onClick: () => {
-                          void client.invalidateQueries({
-                            queryKey: qk.flow(sub.name),
-                          })
+                        onClick: async () => {
+                          try {
+                            await refreshFlow(client, sub.name)
+                          } catch (err) {
+                            toast.error(
+                              `刷新失败:${err instanceof Error ? err.message : err}`,
+                            )
+                          }
                         },
                       },
                     ]}

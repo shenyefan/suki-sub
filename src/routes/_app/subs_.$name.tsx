@@ -19,7 +19,7 @@ import { ApiRoutes } from '#/shared/api-contract'
 import type { Subscription } from '#/shared/types'
 import { api } from '#/lib/api'
 import { cn } from '#/lib/utils'
-import { qk } from '#/lib/queries'
+import { cacheResource } from '#/lib/query-cache'
 import { normalizeProcess } from '#/features/operators/model'
 import { PipelineEditor } from '#/features/operators/pipeline-editor'
 import type { ProcessItem } from '#/features/operators/registry'
@@ -118,7 +118,7 @@ function SubEditorPage() {
 
   const { data: existing, isLoading } = useQuery({
     queryKey: ['sub', name],
-    queryFn: () => api.get<Subscription>(ApiRoutes.sub(name)),
+    queryFn: ({ signal }) => api.get<Subscription>(ApiRoutes.sub(name), signal),
     enabled: !isNew,
   })
 
@@ -172,21 +172,15 @@ function SubEditorPage() {
         process: normalizeProcess(form.process ?? []),
         tag: tags.length ? tags : undefined,
       }
-      if (isNew) return api.post(ApiRoutes.subs, payload)
-      return api.patch(ApiRoutes.sub(name), payload)
+      if (isNew) return api.post<Subscription>(ApiRoutes.subs, payload)
+      return api.patch<Subscription>(ApiRoutes.sub(name), payload)
     },
-    onSuccess: (saved) => {
+    onSuccess: async (saved) => {
+      await cacheResource(client, 'sub', saved, isNew ? undefined : name)
       toast.success(isNew ? '订阅已创建' : '订阅已保存')
-      void client.invalidateQueries({ queryKey: qk.subs })
-      const resource = saved as Subscription
-      client.setQueryData(['sub', resource.name], resource)
-      if (resource.name === name)
-        void client.invalidateQueries({ queryKey: ['sub', name] })
-      void client.invalidateQueries({ queryKey: qk.tokens })
-      void client.invalidateQueries({ queryKey: qk.collections })
       void navigate({
         to: '/subs/$name',
-        params: { name: (saved as Subscription).name },
+        params: { name: saved.name },
         replace: true,
       })
     },

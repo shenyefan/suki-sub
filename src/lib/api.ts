@@ -42,8 +42,14 @@ async function rawRequest(
   method: string,
   url: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const init: RequestInit = { method, headers: { accept: 'application/json' } }
+  const init: RequestInit = {
+    method,
+    headers: { accept: 'application/json' },
+    signal,
+    cache: 'no-store',
+  }
   if (body !== undefined) {
     init.headers = {
       accept: 'application/json',
@@ -74,12 +80,13 @@ export async function apiRequest<T = unknown>(
   method: string,
   url: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
-  let res = await rawRequest(method, url, body)
+  let res = await rawRequest(method, url, body, signal)
   // 会话可能刚过期:session 端点会尝试刷新 cookie,成功后重试一次
   if (res.status === 401) {
     const session = await fetchSession()
-    if (session.authenticated) res = await rawRequest(method, url, body)
+    if (session.authenticated) res = await rawRequest(method, url, body, signal)
   }
   if (!res.ok) throw await parseError(res)
   const text = await res.text()
@@ -91,7 +98,8 @@ export async function apiRequest<T = unknown>(
 }
 
 export const api = {
-  get: <T = unknown>(url: string) => apiRequest<T>('GET', url),
+  get: <T = unknown>(url: string, signal?: AbortSignal) =>
+    apiRequest<T>('GET', url, undefined, signal),
   post: <T = unknown>(url: string, body?: unknown) =>
     apiRequest<T>('POST', url, body),
   patch: <T = unknown>(url: string, body?: unknown) =>

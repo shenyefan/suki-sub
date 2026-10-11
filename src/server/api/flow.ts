@@ -22,6 +22,7 @@ app.get('/api/subs/:name/flow', async (c) =>
     try {
       const name = c.req.param('name')
       const urlArg = c.req.query('url')
+      const noCache = c.req.query('noCache') === 'true'
       const sub = await getSubscription(c.env.SUKI_SUB_DB, name)
       if (!sub)
         throw new ResourceNotFoundError(
@@ -51,6 +52,7 @@ app.get('/api/subs/:name/flow', async (c) =>
             undefined,
             undefined,
             undefined,
+            noCache,
           )
         } else {
           subUserInfo = sub.subUserinfo
@@ -75,6 +77,7 @@ app.get('/api/subs/:name/flow', async (c) =>
           undefined,
           undefined,
           undefined,
+          noCache,
         )
       } catch (err) {
         // 订阅地址不可达时回落到 subUserinfo
@@ -94,6 +97,7 @@ app.get('/api/subs/:name/flow', async (c) =>
           undefined,
           undefined,
           undefined,
+          noCache,
         )
       } else if (sub.subUserinfo) {
         subUserInfo = sub.subUserinfo

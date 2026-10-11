@@ -81,7 +81,9 @@ function LogsPage() {
 
   const clear = useMutation({
     mutationFn: () => api.del(ApiRoutes.logs),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await client.cancelQueries({ queryKey: qk.logs })
+      client.setQueryData(qk.logs, [])
       toast.success('已清空')
       setClearOpen(false)
       void client.invalidateQueries({ queryKey: qk.logs })

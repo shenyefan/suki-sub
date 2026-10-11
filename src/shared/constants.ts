@@ -4,7 +4,6 @@
 
 /** KV 键前缀 */
 export const KV_PREFIX = {
-  token: 'token:',
   resourceCache: 'cache:resource:',
 } as const
 

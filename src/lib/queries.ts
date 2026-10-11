@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query'
 import type { LogEntry } from '#/shared/logs'
 /**
  * 常用服务端状态 hooks(react-query 封装,页面直接消费)。
@@ -27,28 +28,29 @@ export const qk = {
 export function useSubs() {
   return useQuery({
     queryKey: qk.subs,
-    queryFn: () => api.get<Subscription[]>(ApiRoutes.subs),
+    queryFn: ({ signal }) => api.get<Subscription[]>(ApiRoutes.subs, signal),
   })
 }
 
 export function useCollections() {
   return useQuery({
     queryKey: qk.collections,
-    queryFn: () => api.get<Collection[]>(ApiRoutes.collections),
+    queryFn: ({ signal }) =>
+      api.get<Collection[]>(ApiRoutes.collections, signal),
   })
 }
 
 export function useTokens() {
   return useQuery({
     queryKey: qk.tokens,
-    queryFn: () => api.get<TokenItem[]>(ApiRoutes.shares),
+    queryFn: ({ signal }) => api.get<TokenItem[]>(ApiRoutes.shares, signal),
   })
 }
 
 export function useSettings() {
   return useQuery({
     queryKey: qk.settings,
-    queryFn: () => api.get<Settings>(ApiRoutes.settings),
+    queryFn: ({ signal }) => api.get<Settings>(ApiRoutes.settings, signal),
   })
 }
 
@@ -61,7 +63,7 @@ export interface EnvResponse {
 export function useEnv() {
   return useQuery({
     queryKey: qk.env,
-    queryFn: () => api.get<EnvResponse>(ApiRoutes.env),
+    queryFn: ({ signal }) => api.get<EnvResponse>(ApiRoutes.env, signal),
   })
 }
 
@@ -71,8 +73,8 @@ export function useLogs() {
   return useQuery({
     queryKey: qk.logs,
     refetchInterval: 5000,
-    queryFn: async () =>
-      (await api.get<{ logs: LogEntry[] }>(ApiRoutes.logs)).logs,
+    queryFn: async ({ signal }) =>
+      (await api.get<{ logs: LogEntry[] }>(ApiRoutes.logs, signal)).logs,
   })
 }
 
@@ -81,9 +83,22 @@ export type FlowApiResponse = FlowInfoResponse
 export function useFlow(name: string, enabled: boolean) {
   return useQuery({
     queryKey: qk.flow(name),
-    queryFn: () => api.get<FlowApiResponse>(ApiRoutes.subFlow(name)),
+    queryFn: ({ signal }) =>
+      api.get<FlowApiResponse>(ApiRoutes.subFlow(name), signal),
     enabled,
     staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+/** 手动刷新同时绕过前端缓存和服务端流量头缓存。 */
+export async function refreshFlow(client: QueryClient, name: string) {
+  await client.cancelQueries({ queryKey: qk.flow(name) })
+  return client.fetchQuery({
+    queryKey: qk.flow(name),
+    queryFn: ({ signal }) =>
+      api.get<FlowApiResponse>(ApiRoutes.subFlow(name, true), signal),
+    staleTime: 0,
     retry: false,
   })
 }
@@ -92,8 +107,11 @@ export function useFlow(name: string, enabled: boolean) {
 export function useSortMutation(kind: 'subs' | 'collections' | 'modules') {
   const client = useQueryClient()
   return useMutation({
+    mutationKey: ['order', kind],
+    scope: { id: `order-${kind}` },
     mutationFn: (names: string[]) => api.post(ApiRoutes.sort(kind), names),
-    onMutate: (names) => {
+    onMutate: async (names) => {
+      await client.cancelQueries({ queryKey: qk[kind] })
       client.setQueryData<unknown[]>(qk[kind], (old) => {
         if (!Array.isArray(old) || !names.length) return old
         // 被排序项按新顺序填回其原本占据的槽位;未列出的条目位置不动
@@ -106,8 +124,10 @@ export function useSortMutation(kind: 'subs' | 'collections' | 'modules') {
         )
       })
     },
-    onError: () => {
-      void client.invalidateQueries({ queryKey: qk[kind] })
+    onSettled: () => {
+      // 连续拖动按顺序写入，等最后一次完成后再核对，避免旧结果覆盖新排序。
+      if (client.isMutating({ mutationKey: ['order', kind] }) === 1)
+        void client.invalidateQueries({ queryKey: qk[kind] })
     },
   })
 }

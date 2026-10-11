@@ -1,6 +1,4 @@
 import { setResourceContext } from '../store/resource-context'
-import { renameTokenTargets } from '../store/kv'
-import { writeServerEvent } from '../store/logs'
 import isEqual from 'lodash/isEqual.js'
 import { validateForSave } from '../core/preview-process'
 /**
@@ -164,23 +162,6 @@ app.patch('/api/subs/:name', async (c) =>
         )
           throw duplicateName(merged.name)
         throw err
-      }
-      if (name !== merged.name) {
-        try {
-          await renameTokenTargets(
-            c.env.SUKI_SUB_CACHE,
-            'sub',
-            name,
-            merged.name,
-          )
-        } catch (err) {
-          writeServerEvent('warn', '名称已修改，但分享绑定更新失败', {
-            action: 'sub.update',
-            resourceName: merged.name,
-            previousName: name,
-            reason: err instanceof Error ? err.message : String(err),
-          })
-        }
       }
       return c.json(merged)
     } catch (err) {

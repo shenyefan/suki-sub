@@ -11,7 +11,8 @@ import { ApiRoutes } from '#/shared/api-contract'
 import { isTokenExpired } from '#/shared/token'
 import type { TokenItem } from '#/shared/types'
 import { api, copyToClipboard, shareUrl } from '#/lib/api'
-import { qk, useTokens, useSubs, useCollections } from '#/lib/queries'
+import { useTokens, useSubs, useCollections } from '#/lib/queries'
+import { cacheToken, removeCachedToken } from '#/lib/query-cache'
 import { resourceLabel } from '#/lib/resource-display'
 import { ResourceIdentity } from '#/components/shared/resource-identity'
 import { formatDateTime } from '#/lib/format'
@@ -106,6 +107,7 @@ function CreateTokenDialog({
       return api.post<TokenItem>(ApiRoutes.shares, body)
     },
     onSuccess: async (token) => {
+      await cacheToken(client, token)
       const link = tokenLink(token)
       const copied = link && (await copyToClipboard(link))
       toast.success(
@@ -114,7 +116,6 @@ function CreateTokenDialog({
       onOpenChange(false)
       setSelection('')
       setCount('')
-      void client.invalidateQueries({ queryKey: qk.tokens })
     },
     onError: (err) => toast.error(`创建失败:${err.message}`),
   })
@@ -219,10 +220,10 @@ function TokensPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(ApiRoutes.share(id)),
-    onSuccess: () => {
+    onSuccess: async (_, id) => {
+      await removeCachedToken(client, id)
       toast.success('已删除')
       setDeleteId(null)
-      void client.invalidateQueries({ queryKey: qk.tokens })
     },
     onError: (err) => toast.error(`删除失败:${err.message}`),
   })

@@ -19,7 +19,8 @@ import type { Collection, Subscription } from '#/shared/types'
 import { resourceLabel } from '#/lib/resource-display'
 import { ResourceIdentity } from '#/components/shared/resource-identity'
 import { api } from '#/lib/api'
-import { qk, useSubs } from '#/lib/queries'
+import { useSubs } from '#/lib/queries'
+import { cacheResource } from '#/lib/query-cache'
 import { normalizeProcess } from '#/features/operators/model'
 import { PipelineEditor } from '#/features/operators/pipeline-editor'
 import type { ProcessItem } from '#/features/operators/registry'
@@ -57,7 +58,8 @@ function CollectionEditorPage() {
 
   const { data: existing, isLoading } = useQuery({
     queryKey: ['collection', name],
-    queryFn: () => api.get<Collection>(ApiRoutes.collection(name)),
+    queryFn: ({ signal }) =>
+      api.get<Collection>(ApiRoutes.collection(name), signal),
     enabled: !isNew,
   })
 
@@ -104,20 +106,15 @@ function CollectionEditorPage() {
         process: normalizeProcess(form.process ?? []),
         tag: tags.length ? tags : undefined,
       }
-      if (isNew) return api.post(ApiRoutes.collections, payload)
-      return api.patch(ApiRoutes.collection(name), payload)
+      if (isNew) return api.post<Collection>(ApiRoutes.collections, payload)
+      return api.patch<Collection>(ApiRoutes.collection(name), payload)
     },
-    onSuccess: (saved) => {
+    onSuccess: async (saved) => {
+      await cacheResource(client, 'collection', saved, isNew ? undefined : name)
       toast.success(isNew ? '组合已创建' : '组合已保存')
-      void client.invalidateQueries({ queryKey: qk.collections })
-      const resource = saved as Collection
-      client.setQueryData(['collection', resource.name], resource)
-      if (resource.name === name)
-        void client.invalidateQueries({ queryKey: ['collection', name] })
-      void client.invalidateQueries({ queryKey: qk.tokens })
       void navigate({
         to: '/collections/$name',
-        params: { name: (saved as Collection).name },
+        params: { name: saved.name },
         replace: true,
       })
     },

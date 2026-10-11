@@ -1,3 +1,4 @@
+import { TOKEN_DDL } from './tokens'
 /**
  * D1 存储层:资源对象 ↔ 规范化表的映射与读写。
  *
@@ -206,7 +207,7 @@ export async function updateSubscriptionRow(
       now(),
       name,
     )
-  // 名称与组合引用必须在同一事务中更新；名称冲突时整批回滚。
+  // 名称、组合引用与分享绑定必须在同一事务中更新；名称冲突时整批回滚。
   await db.batch([
     statement,
     ...(r.name !== name
@@ -216,6 +217,11 @@ export async function updateSubscriptionRow(
               'UPDATE collection_sources SET value=?1 WHERE kind=?2 AND value=?3',
             )
             .bind(r.name, 'subscription', name),
+          db
+            .prepare(
+              'UPDATE share_tokens SET name=?1 WHERE type=?2 AND name=?3',
+            )
+            .bind(r.name, 'sub', name),
         ]
       : []),
   ])
@@ -387,9 +393,7 @@ export async function createCollection(
     .bind(
       col.name,
       col.process != null ? JSON.stringify(col.process) : null,
-      JSON.stringify(
-        splitObject('collection', col as Record<string, unknown>).extra,
-      ),
+      JSON.stringify(splitObject('collection', col).extra),
       pos,
       now(),
     )
@@ -406,20 +410,29 @@ export async function updateCollectionRow(
   newName?: string,
 ): Promise<void> {
   const target = newName ?? col.name
-  await db
+  const statement = db
     .prepare(
       'UPDATE collections SET name=?1, process=?2, extra=?3, updated_at=?4 WHERE name=?5',
     )
     .bind(
       target,
       col.process != null ? JSON.stringify(col.process) : null,
-      JSON.stringify(
-        splitObject('collection', col as Record<string, unknown>).extra,
-      ),
+      JSON.stringify(splitObject('collection', col).extra),
       now(),
       name,
     )
-    .run()
+  await db.batch([
+    statement,
+    ...(target !== name
+      ? [
+          db
+            .prepare(
+              'UPDATE share_tokens SET name=?1 WHERE type=?2 AND name=?3',
+            )
+            .bind(target, 'collection', name),
+        ]
+      : []),
+  ])
   const row = await db
     .prepare('SELECT id FROM collections WHERE name=?1')
     .bind(target)
@@ -620,9 +633,9 @@ export async function replaceAll(
   await db.batch([db.prepare(`DELETE FROM ${table}`), ...inserts])
 }
 
-/** 幂等建表(与 migrations/0001_init.sql 一致;dev 首次运行兜底) */
+/** 幂等建表(与 migrations/*.sql 一致;dev 首次运行兜底) */
 export async function ensureSchema(db: D1Database): Promise<void> {
-  const statements = [SUB_DDL, COL_DDL, MODULE_DDL, SETTINGS_DDL]
+  const statements = [SUB_DDL, COL_DDL, MODULE_DDL, SETTINGS_DDL, TOKEN_DDL]
     .join(';')
     .split(';')
     .map((s) => s.trim())

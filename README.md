@@ -4,7 +4,7 @@
 
 - 订阅引擎使用 TypeScript，支持节点解析、操作管线和多平台输出；客户端通过 `/s/:id` 分享链接订阅。
 - 前端:React 19 + TanStack Start + shadcn/ui(Geist 设计规范,见 DESIGN.md),桌面侧栏 / 手机底栏自适应
-- 持久化:D1(3NF 规范化表);时效数据:KV(token、订阅缓存)
+- 持久化:D1(3NF 规范化表);时效数据:KV(订阅缓存);分享记录:D1
 - 定时任务:Workers Cron Triggers(Gist 自动备份)
 - 脚本操作符:官方 [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/)(`worker_loaders`)沙箱执行用户脚本 —— **需要 Workers 付费计划**
 
@@ -46,7 +46,7 @@ migrations/               # D1 迁移(wrangler d1 migrations)
 完整契约见 `src/shared/api-contract.ts`。
 
 - 管理接口 `/api/*`:OIDC Bearer JWT(`OIDC_ISSUER` / `OIDC_AUDIENCE` 环境变量校验 iss/aud/exp)
-- 分享链接 `/s/:id`（可选 `/s/:id/:target`）：每个分享只访问绑定的单条订阅或组合订阅，支持有效期和次数限制；未指定平台时自动识别客户端。
+- 分享链接 `/s/:id`（可选 `/s/:id/:target`）：每个分享只访问绑定的单条订阅或组合订阅，支持有效期和次数限制；未指定平台时自动识别客户端。分享记录存于 D1，过期后仍保留；旧 KV 分享通过一次性迁移导入，原 ID 和链接不变；运行时只读取 D1。
 - 管理接口：`/api/subs/:name`、`/api/collections/:name`、`/api/shares`、`/api/settings`、`/api/backup`、`/api/logs`。
 - 日志支持按事件类型、操作者 ID、请求 ID、操作结果组合筛选，范围为最近保留的 2000 条记录。
 - 页面：`/subs`、`/shares`、`/settings`、`/logs`；编辑页为 `/subs/:name` 与 `/collections/:name`。
@@ -93,3 +93,5 @@ pnpm deploy
 ## Styling
 
 前端使用 [Tailwind CSS](https://tailwindcss.com/)。
+
+KV 缓存的内容、有效期和更新规则见 [缓存说明](docs/kv-cache.md)。

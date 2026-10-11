@@ -1,12 +1,12 @@
 /**
- * 订阅分享管理 —— /s/:id 的访问凭据(KV 存储)。
- * 语义参考官方 restful/token.js(绑定 type/name、时长/次数过期),存储改 KV。
+ * 订阅分享管理 —— /s/:id 的访问凭据(D1 存储)。
+ * 语义参考官方 restful/token.js(绑定 type/name、时长/次数过期),存储使用 D1。
  */
 import { Hono } from 'hono'
 import { nanoid } from 'nanoid'
 import type { TokenItem } from '#/shared/types'
 import { errorResponse, failureResponse } from './http'
-import { deleteToken, getToken, listTokens, saveToken } from '../store/kv'
+import { deleteToken, getToken, listTokens, saveToken } from '../store/tokens'
 import { ensureSchema, getSubscription, getCollection } from '../store/d1'
 import { setResourceContext } from '../store/resource-context'
 import { RequestInvalidError } from '../core/errors'
@@ -54,7 +54,7 @@ app.post('/api/shares', async (c) => {
         ? { count: body.count, usedCount: 0 }
         : {}),
     }
-    await saveToken(c.env.SUKI_SUB_CACHE, token)
+    await saveToken(c.env, token)
     return c.json(token, 201)
   } catch (err) {
     return errorResponse(c, err)
@@ -63,7 +63,7 @@ app.post('/api/shares', async (c) => {
 
 app.get('/api/shares', async (c) => {
   try {
-    return c.json(await listTokens(c.env.SUKI_SUB_CACHE))
+    return c.json(await listTokens(c.env))
   } catch (err) {
     return errorResponse(c, err)
   }
@@ -71,7 +71,7 @@ app.get('/api/shares', async (c) => {
 
 app.get('/api/shares/:id', async (c) => {
   try {
-    const token = await getToken(c.env.SUKI_SUB_CACHE, c.req.param('id'))
+    const token = await getToken(c.env, c.req.param('id'))
     if (!token) return failureResponse(c, 'SHARE_NOT_FOUND', '分享不存在', 404)
     return c.json(token)
   } catch (err) {
@@ -81,7 +81,7 @@ app.get('/api/shares/:id', async (c) => {
 
 app.delete('/api/shares/:id', async (c) => {
   try {
-    const token = await getToken(c.env.SUKI_SUB_CACHE, c.req.param('id'))
+    const token = await getToken(c.env, c.req.param('id'))
     if (token?.name) {
       const resource =
         token.type === 'sub'
@@ -89,7 +89,7 @@ app.delete('/api/shares/:id', async (c) => {
           : await getCollection(c.env.SUKI_SUB_DB, token.name)
       if (resource) setResourceContext(c, token.type, resource)
     }
-    await deleteToken(c.env.SUKI_SUB_CACHE, c.req.param('id'))
+    await deleteToken(c.env, c.req.param('id'))
     return c.json({ deleted: true, name: token?.name, type: token?.type })
   } catch (err) {
     return errorResponse(c, err)

@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sub",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "sub.syf.sh", "custom_domain": true }],
   "compatibility_date": "2025-09-02",
   // TanStack Start 服务端要求 node:async_hooks
   "compatibility_flags": ["nodejs_compat"],

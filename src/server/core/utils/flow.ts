@@ -70,6 +70,7 @@ export async function getFlowHeaders(
   timeout: any,
   flowUrl: any,
   flowHeaders: any,
+  noCache = false,
 ) {
   let url = flowUrl || rawUrl || ''
   const parsedLink = parseResourceLink(url)
@@ -124,7 +125,7 @@ export async function getFlowHeaders(
   )
   const cached = await headersResourceCache.get(id)
   let flowInfo
-  if (!$arguments?.noCache && cached) {
+  if (!noCache && !$arguments?.noCache && cached) {
     $.debug(
       `使用缓存的流量信息: ${url}, ${
         customHeaders ? JSON.stringify(customHeaders) : userAgent

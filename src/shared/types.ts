@@ -95,7 +95,7 @@ export interface ModuleItem {
   [key: string]: unknown
 }
 
-/** 订阅分享凭据(存 KV,用于 /s/:id) */
+/** 订阅分享凭据(存 D1,用于 /s/:id) */
 export interface TokenItem {
   id: string
   /** 绑定的订阅类型 */

@@ -27,6 +27,7 @@ import downloadApp from './api/download'
 
 const app = new Hono<{ Bindings: Env }>()
 app.use('*', (c, next) => {
+  if (c.req.path.startsWith('/api/')) c.header('Cache-Control', 'no-store')
   const startedAt = Date.now()
   const requestId = crypto.randomUUID()
   c.set('auditRequestId' as never, requestId as never)

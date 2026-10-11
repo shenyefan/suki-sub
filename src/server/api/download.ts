@@ -8,7 +8,7 @@ import $ from '../core/app'
 import type { Context } from 'hono'
 import { errorResponse, failureResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
-import { getToken, consumeToken } from '../store/kv'
+import { getToken, consumeToken } from '../store/tokens'
 import { produceArtifact } from '../core/produce-artifact'
 import { applyResponseTransformers } from '../core/response-transformer'
 import { applyAgeOutputEncryption } from '../core/age-output'
@@ -192,10 +192,10 @@ function downloadHandler(kind: 'subscription' | 'collection', name: string) {
 
 async function shareHandler(c: Context<{ Bindings: Env }>) {
   const id = c.req.param('id') ?? ''
-  const share = await getToken(c.env.SUKI_SUB_CACHE, id)
+  const share = await getToken(c.env, id)
   if (
     !share ||
-    !(await consumeToken(c.env.SUKI_SUB_CACHE, id, {
+    !(await consumeToken(c.env, id, {
       type: share.type,
       name: share.name,
     }))

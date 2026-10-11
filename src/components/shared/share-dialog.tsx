@@ -8,9 +8,10 @@ import { toast } from 'sonner'
 import { ApiRoutes } from '#/shared/api-contract'
 import type { TokenItem } from '#/shared/types'
 import { api, copyToClipboard, shareUrl } from '#/lib/api'
+import { cacheToken } from '#/lib/query-cache'
 import { resourceLabel } from '#/lib/resource-display'
 import { ResourceIdentity } from './resource-identity'
-import { qk, useSubs, useCollections } from '#/lib/queries'
+import { useSubs, useCollections } from '#/lib/queries'
 import {
   Dialog,
   DialogContent,
@@ -91,6 +92,7 @@ export function ShareDialog({
       const n = Number(count)
       if (count && Number.isFinite(n) && n > 0) body.count = n
       const token = await api.post<TokenItem>(ApiRoutes.shares, body)
+      await cacheToken(queryClient, token)
       const link = shareUrl(
         token.id,
         platform === 'auto' ? undefined : platform,
@@ -100,7 +102,6 @@ export function ShareDialog({
       } else {
         toast.success('分享已创建，可在分享页复制链接')
       }
-      await queryClient.invalidateQueries({ queryKey: qk.tokens })
     } catch (err) {
       toast.error(
         `创建失败:${err instanceof Error ? err.message : String(err)}`,

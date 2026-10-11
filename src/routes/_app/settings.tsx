@@ -9,6 +9,8 @@ import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
 import { api } from '#/lib/api'
+import type { Settings } from '#/shared/types'
+import { cacheSettings } from '#/lib/query-cache'
 import { qk, useSettings } from '#/lib/queries'
 import { PageHeader } from '#/components/shared/page-header'
 import { ConfirmDialog } from '#/components/shared/confirm-dialog'
@@ -92,21 +94,22 @@ function SettingsPage() {
 
   const saveSettings = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      api.patch(ApiRoutes.settings, patch),
-    onSuccess: () => {
+      api.patch<Settings>(ApiRoutes.settings, patch),
+    onSuccess: async (saved) => {
+      await cacheSettings(client, saved)
       toast.success('设置已保存')
-      void client.invalidateQueries({ queryKey: qk.settings })
     },
     onError: (err) => toast.error(`保存失败:${err.message}`),
   })
 
   const saveAndBackup = useMutation({
     mutationFn: async () => {
-      await api.patch(ApiRoutes.settings, {
+      const saved = await api.patch<Settings>(ApiRoutes.settings, {
         gistToken,
         syncPlatform,
         gistBackupName,
       })
+      await cacheSettings(client, saved)
       try {
         await api.post(ApiRoutes.backupSync)
       } catch (err) {
@@ -131,10 +134,11 @@ function SettingsPage() {
       const payload = JSON.parse(await file.text())
       return api.post(ApiRoutes.storage, payload)
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await client.cancelQueries()
+      await client.invalidateQueries()
       toast.success('恢复完成')
       setRestoreFile(null)
-      void client.invalidateQueries()
     },
     onError: (err) =>
       toast.error(`恢复失败:${err instanceof Error ? err.message : err}`),

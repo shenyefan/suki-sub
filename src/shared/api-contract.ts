@@ -34,7 +34,8 @@ export const ApiRoutes = {
   // 订阅
   subs: '/api/subs',
   sub: (name: string) => `/api/subs/${encodeURIComponent(name)}`,
-  subFlow: (name: string) => `/api/subs/${encodeURIComponent(name)}/flow`,
+  subFlow: (name: string, noCache = false) =>
+    `/api/subs/${encodeURIComponent(name)}/flow${noCache ? '?noCache=true' : ''}`,
   subClone: (name: string) => `/api/subs/${encodeURIComponent(name)}/clone`,
   // 组合
   collections: '/api/collections',
