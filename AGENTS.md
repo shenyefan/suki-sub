@@ -71,6 +71,60 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 错误统一走 `core/errors.ts` 的 `BaseError(code, message, fields)`,HTTP 层再由 `api/http.ts` 做内容协商:`Accept` 偏 HTML(浏览器)返回错误页面,否则返回平面 JSON `{code, message, ...context}`,并保留 HTTP 状态码。前端 `lib/api.ts` 的 `ApiError` 把同一个形状还原成对象。
 
+## Sub-Store 上游来源与同步记录
+
+本项目参考的是 [sub-store-org/Sub-Store](https://github.com/sub-store-org/Sub-Store)，不是 Substack。运行时执行本仓库的 TypeScript 引擎，不会自动拉取或运行上游最新脚本。
+
+### 当前核对基准
+
+- 核对日期：2026-10-11。
+- 上游分支：`master`；GitHub API 实时读取的 HEAD 为 [`a3e61061e50b40e5c5938969aab915d05d8d7069`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069)，提交日期 2026-10-06，版本 `2.42.3`。
+- **这是核对基准，不是已全量同步基线。** 本地没有可靠的原始移植 SHA 记录，且下表仍有待同步变更，不能把当前引擎标记为已同步至这个 commit。
+- 本次仅核对源码并登记差异，没有修改引擎实现。以后实际同步后，应更新模块状态和已同步 commit，不要仅因下载了最新源码就推进同步记录。
+
+### 源文件对应关系
+
+表中的上游路径均相对于 Sub-Store 仓库根目录。
+
+| 功能 | 本项目实际执行位置 | Sub-Store 对应源文件 |
+| --- | --- | --- |
+| 节点解析、处理与产出编排 | `src/server/core/proxy-utils/index.ts` | `backend/src/core/proxy-utils/index.js` |
+| 节点格式识别与 URI 解析 | `src/server/core/proxy-utils/parsers/index.ts` | `backend/src/core/proxy-utils/parsers/index.js` |
+| 输入预处理 | `src/server/core/proxy-utils/preprocessors/index.ts` | `backend/src/core/proxy-utils/preprocessors/index.js` |
+| 节点操作符及脚本操作、脚本过滤、响应转换器 | `src/server/core/proxy-utils/processors/index.ts` | `backend/src/core/proxy-utils/processors/index.js` |
+| 各客户端节点输出 | `src/server/core/proxy-utils/producers/*.ts` | `backend/src/core/proxy-utils/producers/*.js`，按同名文件对应 |
+| 规则集解析与转换 | `src/server/core/rule-utils/{index,parsers,preprocessors,producers}.ts` | `backend/src/core/rule-utils/{index,parsers,preprocessors,producers}.js` |
+| Peggy 节点语法 | `src/server/core/proxy-utils/parsers/peggy/grammars/*.peggy` | `backend/src/core/proxy-utils/parsers/peggy/*.js` 中的语法模板；本地 `.gen.ts` 为构建期生成文件 |
+| 订阅与组合产出编排 | `src/server/core/produce-artifact.ts` | `backend/src/restful/sync.js` 中的 `produceArtifact` |
+| 下载响应、流量头与后处理 | `src/server/api/download.ts`、`download-flow.ts`、`download-options.ts`、`download-metadata.ts` | `backend/src/restful/download.js`；本地额外提供中文文件名及可选组合流量汇总 |
+| 响应转换器调度、age 输出加密 | `src/server/core/response-transformer.ts`、`age-output.ts` | `backend/src/restful/response-transformer.js`、`age-output.js` |
+| 下载与流量工具 | `src/server/core/utils/{download,flow}.ts` | `backend/src/utils/{download,flow}.js` |
+| 用户脚本执行工具 | `src/server/core/utils/user-script.ts`、`sandbox/loader.ts` | `backend/src/core/proxy-utils/processors/index.js` 中的动态脚本构造；本地替换为 Workers 沙箱，不存在一一对应的上游 `user-script.js` |
+
+上游 [Loon 资源解析器脚本](https://github.com/sub-store-org/Sub-Store/blob/master/backend/src/products/resource-parser.loon.js) 是给 Loon 客户端执行的入口，引用同一套 `ProxyUtils` / `RuleUtils`。本项目没有直接部署这个脚本，而是在 Workers 中移植上述核心源码。上游 `backend/src/products/proxy-utils.esm.js` 也只是导出 `ProxyUtils.parse/produce` 的入口，不是本项目应直接覆盖的解析器。`scripts/demo.js` 是上游演示脚本，不是生产引擎。
+
+### 本次发现的待同步项
+
+| 上游 commit | 更新 | 本地核对结果与同步位置 |
+| --- | --- | --- |
+| [`a3e61061e50b`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069) | sing-box TLS `certificate_sha256` | 未同步。`producers/sing-box.ts` 仍丢弃普通证书指纹；上游已支持显式指纹和十六进制转 Base64，增加证书配置冲突检查及 Reality 处理 |
+| [`e08f1b19f436`](https://github.com/sub-store-org/Sub-Store/commit/e08f1b19f436) | Loon TLS profile | 未同步。需一起更新 `proxy-utils/index.ts`、`producers/loon.ts` 和 `grammars/loon.peggy`；本地仍使用 `ios18/ios26`，上游改为 `safari-ios18/safari-ios-26` 等并调整指纹映射 |
+| [`04f44c2ae24d`](https://github.com/sub-store-org/Sub-Store/commit/04f44c2ae24d) | sing-box SSH 私钥 | 未同步。`producers/sing-box.ts` 仍把私钥正文当路径；上游按 `PRIVATE KEY` 区分 `private_key` 与 `private_key_path` |
+| [`7b9d822722dd`](https://github.com/sub-store-org/Sub-Store/commit/7b9d822722dd) | SS URI UDP 开关 | 未同步。`parsers/index.ts` 仍用字符串真值，`udp=0/false/off` 会误开启；`producers/uri.ts` 缺少 `udp=0/1` 输出 |
+| [`104c941656eb`](https://github.com/sub-store-org/Sub-Store/commit/104c941656eb) | sing-box WireGuard / Tailscale 字段 | 未同步。`producers/sing-box.ts` 缺少 `_on_demand`、`_listen_port`、`_name`、UDP 映射/过滤、`_udp_nat_max`、`_taildrop_directory` 等映射及边界校验 |
+
+已具备的近期能力：Loon `server-dns`（`8c2a695663b2`）、Loon `chrome147`（`07d94ef9e197`）、VLESS URI `finalmask`（`18dfe4c07287`）。这不代表整个对应模块与最新上游一致。
+
+规则集目录最近的上游提交仍为 `65c0b83982310f39257af53f4ed4608270ba19e4`（2024-03-15）。核对最新 HEAD 后，解析、预处理和产出逻辑没有待同步更新；本地主要差别是类型、日志和 QX 输出标识 `SUKI-SUB`。节点脚本操作符的最近上游提交为 `2700c8ca5054`（2026-08-02，`noFlow` 上下文），输入预处理器最近提交为 `87c43fed361c`（2026-07-11）；它们不在此次最近几次提交的变更范围内。
+
+### 后续同步步骤
+
+1. 实时读取 GitHub `master` 的 HEAD，按上次核对 SHA 查看新增提交，再按上表源文件定位差异。记录不可变 SHA，避免只写“最新版”。
+2. 按功能同步源码，区分上游新增逻辑、TypeScript 类型调整和本地 Workers 改造；不要直接用上游整文件覆盖本地代码。优先核对上游 `backend/src/test/proxy-parsers/`、`proxy-producers/` 和 `proxy-processors/` 中该提交新增的样例。
+3. Peggy 语法改动写入 `grammars/*.peggy`，然后按包装文件头部命令重新生成 `.gen.ts`，禁止重新引入运行时 `peggy.generate()`。
+4. 节点操作符变化同步前端注册表及表单。用户脚本继续走 `sandbox/loader.ts` 的 Dynamic Workers，不同步上游 `new Function`、Node 文件系统、TCP 代理或进程任务；`$sukiSub` 沙箱约定与 D1/AsyncLocalStorage 存储约定保持不变。
+5. 运行相关输入/输出样例及类型、lint、格式、生产构建校验；按用户要求不启动浏览器、不自动部署。将已同步与仍待同步的 commit 分别登记并提交本地 Git。
+
 ## 操作符两端必须同步改
 
 前端有一个操作符注册表,后端引擎有对应的处理器,两边是**两套代码一个契约**:
