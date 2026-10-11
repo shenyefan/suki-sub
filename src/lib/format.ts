@@ -1,3 +1,5 @@
+import type { FlowInfoResponse } from '#/shared/api-contract'
+
 /** 展示层格式化工具 */
 
 export function formatBytes(bytes?: number): string {
@@ -21,30 +23,24 @@ export function formatDateTime(input?: string | number): string {
 }
 
 /** 流量信息(su-sub flow API 返回)解析为进度条数据 */
-export interface FlowInfo {
-  upload?: number
-  download?: number
-  total?: number
-  expire?: number
-  expires?: number
-}
+export type FlowInfo = FlowInfoResponse
 
 export function flowPercent(flow: FlowInfo): number | null {
-  const used = (flow.upload ?? 0) + (flow.download ?? 0)
+  const used = (flow.usage?.upload ?? 0) + (flow.usage?.download ?? 0)
   const total = flow.total ?? 0
   if (!total) return null
   return Math.min(100, Math.round((used / total) * 100))
 }
 
 export function flowRemainingDays(flow: FlowInfo): number | null {
-  const expire = flow.expires ?? flow.expire
+  const expire = flow.expires
   if (!expire) return null
   const days = Math.ceil((expire * 1000 - Date.now()) / 86400000)
   return days
 }
 
 export function flowText(flow: FlowInfo): string {
-  const used = (flow.upload ?? 0) + (flow.download ?? 0)
+  const used = (flow.usage?.upload ?? 0) + (flow.usage?.download ?? 0)
   return `${formatBytes(used)} / ${formatBytes(flow.total)}`
 }
 

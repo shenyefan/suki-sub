@@ -1,3 +1,4 @@
+import type { FlowInfoResponse } from '#/shared/api-contract'
 import { downloadError, upstreamHttpError } from './diagnostics'
 import { parseResourceLink } from '#/shared/resource-link'
 /**
@@ -156,8 +157,8 @@ export async function getFlowHeaders(
         }
         return (
           Number.isFinite(parsed?.total) &&
-          Number.isFinite(parsed?.usage.download) &&
-          Number.isFinite(parsed?.usage.upload)
+          Number.isFinite(parsed?.usage?.download) &&
+          Number.isFinite(parsed?.usage?.upload)
         )
       }
       const flowField = getFlowField(headers)
@@ -258,31 +259,26 @@ export async function getFlowHeaders(
 
   return flowInfo
 }
-export function parseFlowHeaders(flowHeaders: any) {
+export function parseFlowHeaders(
+  flowHeaders: any,
+): FlowInfoResponse | undefined {
   if (!flowHeaders) return
-  // unit is KB
-  const uploadMatch = flowHeaders.match(
-    /upload=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
-  )
-  const upload =
-    uploadMatch == null ? 0 : Number(uploadMatch[1] + uploadMatch[2])
-
-  const downloadMatch = flowHeaders.match(
-    /download=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
-  )
-  const download = Number(downloadMatch[1] + downloadMatch[2])
-  const totalMatch = flowHeaders.match(
-    /total=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
-  )
-  const total = Number(totalMatch[1] + totalMatch[2])
-
-  // optional expire timestamp
-  const expireMatch = flowHeaders.match(
-    /expire=([-+]?)([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)/,
-  )
-  const expires = expireMatch
-    ? Number(expireMatch[1] + expireMatch[2])
-    : undefined
+  // 上传、下载与总额度的单位是字节，到期时间是 Unix 秒。
+  const readNumber = (key: string) => {
+    const match = flowHeaders.match(
+      new RegExp(
+        `(?:^|;)\\s*${key}\\s*=\\s*([-+]?(?:[0-9]*\\.)?[0-9]+(?:[eE][-+]?[0-9]+)?)\\s*(?=;|$)`,
+        'i',
+      ),
+    )
+    if (!match) return undefined
+    const value = Number(match[1])
+    return Number.isFinite(value) ? value : undefined
+  }
+  const upload = readNumber('upload') ?? 0
+  const download = readNumber('download') ?? 0
+  const total = readNumber('total')
+  const expires = readNumber('expire')
 
   const remainingDaysMatch = flowHeaders.match(/reset_day=([0-9]+)/)
   const remainingDays = remainingDaysMatch

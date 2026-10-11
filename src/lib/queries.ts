@@ -4,6 +4,7 @@ import type { LogEntry } from '#/shared/logs'
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiRoutes } from '#/shared/api-contract'
+import type { FlowInfoResponse } from '#/shared/api-contract'
 import { api } from '#/lib/api'
 import type {
   Collection,
@@ -75,13 +76,7 @@ export function useLogs() {
   })
 }
 
-export interface FlowApiResponse {
-  upload?: number
-  download?: number
-  total?: number
-  expire?: number
-  expires?: number
-}
+export type FlowApiResponse = FlowInfoResponse
 
 export function useFlow(name: string, enabled: boolean) {
   return useQuery({

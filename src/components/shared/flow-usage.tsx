@@ -24,7 +24,7 @@ export function FlowUsageLine({ flow }: { flow: FlowInfo }) {
   )
 }
 
-/** The usage bar keeps details in a tooltip, alongside optional card remarks. */
+/** 进度条悬浮展示流量详情，与卡片备注并排。 */
 export function FlowUsageProgress({ flow }: { flow: FlowInfo }) {
   const percent = flowPercent(flow)
   if (
@@ -35,8 +35,8 @@ export function FlowUsageProgress({ flow }: { flow: FlowInfo }) {
     !(flow.total! > 0)
   )
     return null
-  const used = (flow.upload ?? 0) + (flow.download ?? 0)
-  const expire = flow.expires ?? flow.expire
+  const used = (flow.usage?.upload ?? 0) + (flow.usage?.download ?? 0)
+  const expire = flow.expires
   const days = flowRemainingDays(flow)
   return (
     <Progress
@@ -55,9 +55,9 @@ export function FlowUsageProgress({ flow }: { flow: FlowInfo }) {
             <dt>剩余</dt>
             <dd>{formatBytes(Math.max(0, flow.total! - used))}</dd>
             <dt>上传</dt>
-            <dd>{formatBytes(flow.upload ?? 0)}</dd>
+            <dd>{formatBytes(flow.usage?.upload ?? 0)}</dd>
             <dt>下载</dt>
-            <dd>{formatBytes(flow.download ?? 0)}</dd>
+            <dd>{formatBytes(flow.usage?.download ?? 0)}</dd>
             {expire != null && Number.isFinite(expire) && expire > 0 && (
               <>
                 <dt>到期时间</dt>

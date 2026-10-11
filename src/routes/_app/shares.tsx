@@ -1,13 +1,14 @@
 /**
  * 分享 token 管理:资源卡网格 + 详情弹窗(复制链接、删除)。
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link2, Plus, Share2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
+import { isTokenExpired } from '#/shared/token'
 import type { TokenItem } from '#/shared/types'
 import { api, copyToClipboard, shareUrl } from '#/lib/api'
 import { qk, useTokens, useSubs, useCollections } from '#/lib/queries'
@@ -226,15 +227,11 @@ function TokensPage() {
     onError: (err) => toast.error(`删除失败:${err.message}`),
   })
 
-  const expired = useMemo(
-    () =>
-      new Set(
-        (tokens.data ?? [])
-          .filter((t) => t.endAt != null && t.endAt < Date.now())
-          .map((t) => t.id),
-      ),
-    [tokens.data],
-  )
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   return (
     <div className="page-container">
@@ -288,7 +285,7 @@ function TokensPage() {
                 title={
                   <>
                     {resourceLabel(resource, token.name)}
-                    {expired.has(token.id) && (
+                    {isTokenExpired(token, now) && (
                       <Badge variant="destructive">已过期</Badge>
                     )}
                   </>
@@ -321,13 +318,12 @@ function TokensPage() {
                         },
                       ]
                     : []),
-                ]}
-                moreActions={[
                   {
                     key: 'delete',
                     label: '删除',
                     icon: Trash2,
                     destructive: true,
+                    className: 'ml-auto',
                     onClick: () => setDeleteId(token.id),
                   },
                 ]}

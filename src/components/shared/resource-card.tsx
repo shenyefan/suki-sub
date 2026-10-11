@@ -30,6 +30,7 @@ export interface CardAction {
   icon: React.ComponentType<{ className?: string }>
   onClick: () => void
   destructive?: boolean
+  className?: string
 }
 
 export function CardIcon({
@@ -155,6 +156,10 @@ function CardLayout({
             aria-label={action.label}
             title={action.label}
             onClick={action.onClick}
+            className={cn(
+              action.destructive && 'text-destructive hover:text-destructive',
+              action.className,
+            )}
           >
             <action.icon className="size-4" />
           </Button>

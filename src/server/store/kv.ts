@@ -1,8 +1,9 @@
 /**
  * KV 存储层:token、远程订阅缓存。
- * KV 最终一致,只放时效性数据;持久数据一律走 D1。
+ * KV 最终一致；分享保留至手动删除，资源缓存使用 TTL。
  */
 import { KV_PREFIX } from '#/shared/constants'
+import { isTokenExpired } from '#/shared/token'
 import type { TokenItem } from '#/shared/types'
 
 export async function kvGet<T>(
@@ -53,11 +54,8 @@ export async function saveToken(
   kv: KVNamespace,
   token: TokenItem,
 ): Promise<void> {
-  // 时长过期交给 KV TTL;次数过期在读取侧判断并递减
-  const ttl = token.endAt
-    ? Math.max(0, Math.floor((token.endAt - Date.now()) / 1000))
-    : undefined
-  await kvPut(kv, `${KV_PREFIX.token}${token.id}`, token, ttl)
+  // 有效期只控制访问权限，保留记录供查看与手动删除。
+  await kvPut(kv, `${KV_PREFIX.token}${token.id}`, token)
 }
 
 export async function deleteToken(kv: KVNamespace, id: string): Promise<void> {
@@ -77,7 +75,6 @@ export async function renameTokenTargets(
     for (const key of page.keys) {
       const token = await kvGet<TokenItem>(kv, key.name)
       if (token?.type !== type || token.name !== oldName) continue
-      if (token.endAt != null && token.endAt <= Date.now()) continue
       await saveToken(kv, { ...token, name: newName })
     }
     cursor = page.list_complete ? undefined : page.cursor
@@ -85,13 +82,19 @@ export async function renameTokenTargets(
 }
 
 export async function listTokens(kv: KVNamespace): Promise<TokenItem[]> {
-  const list = await kv.list<TokenItem>({ prefix: KV_PREFIX.token })
-  // kv.list 的 metadata 不一定包含完整值,逐个读取(单用户量级小,可接受)
   const items: TokenItem[] = []
-  for (const key of list.keys) {
-    const v = await getToken(kv, key.name.slice(KV_PREFIX.token.length))
-    if (v) items.push(v)
-  }
+  let cursor: string | undefined
+  do {
+    const page = await kv.list({ prefix: KV_PREFIX.token, cursor })
+    for (const key of page.keys) {
+      const token = await getToken(kv, key.name.slice(KV_PREFIX.token.length))
+      if (!token) continue
+      // 兼容旧记录：取消仍存在的 KV 自动删除期限。
+      if (key.expiration != null) await saveToken(kv, token)
+      items.push(token)
+    }
+    cursor = page.list_complete ? undefined : page.cursor
+  } while (cursor)
   return items
 }
 
@@ -109,10 +112,9 @@ export async function consumeToken(
   const typeOk = token.type === expect.type
   const nameOk = token.name === expect.name
   if (!typeOk || !nameOk) return null
-  if (token.endAt != null && token.endAt < Date.now()) return null
+  if (isTokenExpired(token)) return null
   if (token.count != null) {
     const used = token.usedCount ?? 0
-    if (used >= token.count) return null
     token.usedCount = used + 1
     await saveToken(kv, token)
   }
