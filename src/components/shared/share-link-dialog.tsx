@@ -1,4 +1,4 @@
-import { QRCodeSVG } from 'qrcode.react'
+import { QRCode } from '#/components/ui/qr-code'
 import { Link2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -37,13 +37,15 @@ export function ShareLinkDialog({
         {link && (
           <>
             <div className="mx-auto max-w-full rounded-md border bg-white p-2">
-              <QRCodeSVG
-                value={link}
-                size={240}
-                level="M"
-                marginSize={4}
-                title="订阅分享二维码"
-                className="h-auto max-w-full"
+              <QRCode
+                key={link}
+                data={link}
+                robustness="M"
+                foreground="oklch(0 0 0)"
+                background="oklch(1 0 0)"
+                role="img"
+                aria-label="订阅分享二维码"
+                className="size-60 max-w-full"
               />
             </div>
             <div className="grid gap-2">
