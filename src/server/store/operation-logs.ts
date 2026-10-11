@@ -112,7 +112,7 @@ export async function recordOperation(
       /* 不记录请求正文。 */
     }
   }
-  // 只选取操作上下文；从不存储配置内容、分享 ID 或凭据。
+  // 只选取操作上下文；实际请求路径由审计元数据记录，不存储配置正文或鉴权字段。
   if (c.res.headers.get('content-type')?.includes('application/json')) {
     try {
       const result: Record<string, unknown> = await c.res.clone().json()

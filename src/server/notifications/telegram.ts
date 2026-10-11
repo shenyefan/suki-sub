@@ -249,10 +249,7 @@ export function formatTelegramEvent(entry: ServerLog): string {
   if (d.count != null) field('分享次数上限', d.count)
   if (d.endAt) field('分享到期时间', new Date(Number(d.endAt)).toISOString())
   if (failed(entry) && d.path) {
-    const path = String(d.path)
-      .replace(/^\/s\/.*/, '/s/:share')
-      .replace(/^\/api\/shares\/.*/, '/api/shares/:share')
-    field('请求', [d.method, path].filter(Boolean).join(' '), 200)
+    field('请求', [d.method, d.path].filter(Boolean).join(' '), 200)
   }
   if (d.httpStatus) field('接口状态', `HTTP ${d.httpStatus}`)
   if (d.status) field('上游状态', `HTTP ${d.status}`)

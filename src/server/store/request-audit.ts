@@ -26,11 +26,6 @@ export function requestAuditDetails(
   const actor = c.get('auditActor' as never) as
     Record<string, unknown> | undefined
   const cf = c.req.raw.cf
-  const path = c.req.path.startsWith('/s/')
-    ? '/s/:share'
-    : c.req.path.startsWith('/api/shares/')
-      ? '/api/shares/:share'
-      : c.req.path
   const userAgent = c.req.header('user-agent')?.slice(0, 1024)
   return {
     ...actor,
@@ -54,7 +49,7 @@ export function requestAuditDetails(
       : undefined,
     requestHost: new URL(c.req.url).host,
     method: c.req.method,
-    path,
+    path: c.req.path,
     auditRequestId: c.get('auditRequestId' as never),
     durationMs: Date.now() - startedAt,
     country: cf?.country,
