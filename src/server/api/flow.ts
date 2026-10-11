@@ -5,7 +5,8 @@ import { Hono } from 'hono'
 import { isLinkFlagEnabled, parseResourceLink } from '#/shared/resource-link'
 import { errorResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
-import { getSubscription } from '../store/d1'
+import { getSubscription, getCollection } from '../store/d1'
+import { collectionFlow } from './download-flow'
 import { getFlowHeaders, parseFlowHeaders } from '../core/utils/flow'
 import {
   AGE_PUBLIC_KEY,
@@ -111,6 +112,38 @@ app.get('/api/subs/:name/flow', async (c) =>
       return c.json(result)
     } catch (err) {
       return errorResponse(c, err)
+    }
+  }),
+)
+
+/** 组合卡片与分享下载共用流量来源及汇总规则。 */
+app.get('/api/collections/:name/flow', async (c) =>
+  withApiStore(c.env, async () => {
+    try {
+      const collection = await getCollection(
+        c.env.SUKI_SUB_DB,
+        c.req.param('name'),
+      )
+      if (!collection)
+        throw new ResourceNotFoundError(
+          'COLLECTION_NOT_FOUND',
+          '组合订阅不存在',
+        )
+      if (isLinkFlagEnabled(c.req.query('noFlow')) || collection.noFlow)
+        throw new RequestInvalidError('NO_FLOW_INFO', '组合订阅已关闭流量信息')
+      const value = await collectionFlow(
+        collection,
+        (name) => getSubscription(c.env.SUKI_SUB_DB, name),
+        isLinkFlagEnabled(c.req.query('noCache')),
+      )
+      if (!value)
+        throw new RequestInvalidError(
+          'NO_FLOW_INFO',
+          '所选来源没有完整的流量信息',
+        )
+      return c.json(parseFlowHeaders(value))
+    } catch (error) {
+      return errorResponse(c, error)
     }
   }),
 )

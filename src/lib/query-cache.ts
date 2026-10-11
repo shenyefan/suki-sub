@@ -1,3 +1,4 @@
+import { updateCollectionFlowMember } from '#/shared/collection-flow'
 /** 写入成功后先取消旧请求，再用服务端结果更新缓存，最后后台核对。 */
 import type { QueryClient, QueryKey } from '@tanstack/react-query'
 import { qk } from './queries'
@@ -39,6 +40,7 @@ async function cancelResourceQueries(client: QueryClient, kind: ResourceKind) {
     kind === 'sub' ? qk.subs : qk.collections,
     [kind],
     qk.tokens,
+    ['collectionFlow'],
   ]
   if (kind === 'sub') keys.push(qk.collections, ['collection'])
   await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })))
@@ -49,12 +51,8 @@ function updateMembers(
   previousName: string,
   newName?: string,
 ) {
-  const update = (collection: Collection): Collection => ({
-    ...collection,
-    subscriptions: collection.subscriptions.flatMap((name) =>
-      name === previousName ? (newName ? [newName] : []) : [name],
-    ),
-  })
+  const update = (collection: Collection): Collection =>
+    updateCollectionFlowMember(collection, previousName, newName)
   client.setQueryData<Collection[]>(qk.collections, (old) => old?.map(update))
   client.setQueriesData<Collection>({ queryKey: ['collection'] }, (old) =>
     old ? update(old) : old,
@@ -90,6 +88,11 @@ export async function cacheResource(
       ),
     )
     if (kind === 'sub') updateMembers(client, previousName, resource.name)
+    else
+      client.removeQueries({
+        queryKey: qk.collectionFlow(previousName),
+        exact: true,
+      })
   }
   if (kind === 'sub') {
     void client.invalidateQueries({ queryKey: qk.flow(resource.name) })
@@ -98,6 +101,7 @@ export async function cacheResource(
     void client.invalidateQueries({ queryKey: qk.collections })
     void client.invalidateQueries({ queryKey: ['collection'] })
   }
+  void client.invalidateQueries({ queryKey: ['collectionFlow'] })
   void client.invalidateQueries({ queryKey })
   void client.invalidateQueries({ queryKey: qk.tokens })
 }
@@ -113,11 +117,14 @@ export async function removeCachedResource(
     old?.filter((item) => item.name !== name),
   )
   client.removeQueries({ queryKey: [kind, name], exact: true })
+  if (kind === 'collection')
+    client.removeQueries({ queryKey: qk.collectionFlow(name), exact: true })
   if (kind === 'sub') {
     client.removeQueries({ queryKey: qk.flow(name), exact: true })
     updateMembers(client, name)
     void client.invalidateQueries({ queryKey: qk.collections })
     void client.invalidateQueries({ queryKey: ['collection'] })
   }
+  void client.invalidateQueries({ queryKey: ['collectionFlow'] })
   void client.invalidateQueries({ queryKey })
 }

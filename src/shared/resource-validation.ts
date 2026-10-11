@@ -78,6 +78,55 @@ export function validateResource(
           })
       })
   }
+  if (kind === 'collection' && draft.flowSource != null) {
+    const source = draft.flowSource as Record<string, unknown>
+    if (
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      !['first', 'subscription', 'sum', 'custom', 'none'].includes(
+        String(source.type),
+      )
+    ) {
+      add('flowSource', '请选择有效的流量来源')
+    } else if (['subscription', 'sum'].includes(String(source.type))) {
+      const names = source.subscriptions
+      if (
+        !Array.isArray(names) ||
+        !names.length ||
+        (source.type === 'subscription' && names.length !== 1)
+      )
+        add(
+          'flowSource',
+          source.type === 'subscription'
+            ? '请选择一个成员作为流量来源'
+            : '请至少选择一个参与流量汇总的成员',
+        )
+      else if (
+        names.some(
+          (name) =>
+            typeof name !== 'string' ||
+            !Array.isArray(draft.subscriptions) ||
+            !draft.subscriptions.includes(name),
+        )
+      )
+        add('flowSource', '流量来源只能选择当前组合内的成员')
+    } else if (source.type === 'custom') {
+      if (typeof source.custom !== 'string' || !source.custom.trim())
+        add('flowSource', '请填写流量信息或获取地址')
+      else if (
+        /^(?:https?:|.*:\/\/)/i.test(source.custom) &&
+        !validUrl(source.custom)
+      )
+        add('flowSource', '流量地址必须是有效的 HTTP 或 HTTPS 地址')
+      else if (
+        !/^https?:\/\//i.test(source.custom) &&
+        !/(?:^|;)\s*(?:upload|download|total)\s*=\s*[-+]?\d/i.test(
+          source.custom,
+        )
+      )
+        add('flowSource', '请填写有效的 subscription-userinfo 流量信息')
+    }
+  }
   if (draft.process != null && !Array.isArray(draft.process))
     add('process', '处理步骤必须是操作数组')
   if (Array.isArray(draft.process))

@@ -1,5 +1,10 @@
+import { collectionFlowSource } from '#/shared/collection-flow'
 import type { Collection, Subscription } from '#/shared/types'
-import { getFlowHeaders, normalizeFlowHeader } from '../core/utils/flow'
+import {
+  getFlowHeaders,
+  normalizeFlowHeader,
+  parseFlowHeaders,
+} from '../core/utils/flow'
 import { parseResourceLink } from '#/shared/resource-link'
 import $ from '../core/app'
 
@@ -52,24 +57,91 @@ export async function subscriptionFlow(sub: Subscription, noCache: boolean) {
   return [custom, upstream].filter(Boolean).join('; ')
 }
 
+/** 汇总只在全部来源取得有效流量时返回，避免显示误导性的部分额度。 */
+export function sumFlowHeaders(
+  values: (string | undefined)[],
+): string | undefined {
+  if (
+    !values.length ||
+    values.some(
+      (value) =>
+        !value || !/(?:^|;)\s*(?:upload|download|total)\s*=/i.test(value),
+    )
+  )
+    return undefined
+  const flows = values.map((value) =>
+    parseFlowHeaders(normalizeFlowHeader(value, false)),
+  )
+  if (flows.some((flow) => !flow)) return undefined
+  const upload = flows.reduce(
+    (total, flow) => total + Math.max(0, flow?.usage?.upload || 0),
+    0,
+  )
+  const download = flows.reduce(
+    (total, flow) => total + Math.max(0, flow?.usage?.download || 0),
+    0,
+  )
+  const totals = flows.map((flow) => flow?.total)
+  const expiries = flows
+    .map((flow) => flow?.expires)
+    .filter(
+      (value): value is number =>
+        value != null && value > 0 && Number.isFinite(value),
+    )
+  const fields = [`upload=${upload}`, `download=${download}`]
+  if (
+    totals.every(
+      (value) => value != null && Number.isFinite(value) && value > 0,
+    )
+  )
+    fields.push(
+      `total=${totals.reduce<number>((total, value) => total + (value || 0), 0)}`,
+    )
+  if (expiries.length) fields.push(`expire=${Math.min(...expiries)}`)
+  return fields.join('; ')
+}
+
 export async function collectionFlow(
   collection: Collection,
-  firstSub: Subscription | null,
+  resolveSub: (name: string) => Promise<Subscription | null>,
   noCache: boolean,
 ) {
   if (collection.noFlow) return undefined
-  const [custom, first] = await Promise.all([
-    safely(() =>
-      customFlow(
-        collection.subUserinfo,
-        noCache || collection.noCache === true,
-      ),
-    ),
-    collection.firstSubFlow !== false && firstSub
-      ? subscriptionFlow(firstSub, noCache || collection.noCache === true)
-      : undefined,
-  ])
-  return [custom, first].filter(Boolean).join('; ')
+  const config =
+    !collection.flowSource && collection.firstSubFlow !== false
+      ? { type: 'first' as const }
+      : collectionFlowSource(collection)
+  const bypass = noCache || collection.noCache === true
+  if (config.type === 'none') return undefined
+  if (config.type === 'custom')
+    return safely(() => customFlow(config.custom, bypass))
+  const members =
+    config.type === 'first'
+      ? collection.subscriptions.slice(0, 1)
+      : [...new Set(config.subscriptions || [])]
+  if (
+    !members.length ||
+    members.some((member) => !collection.subscriptions.includes(member))
+  )
+    return undefined
+  if (config.type === 'subscription' && members.length !== 1) return undefined
+  const flows = await Promise.all(
+    members.map(async (member) => {
+      const sub = /^https?:\/\//i.test(member)
+        ? { name: member, url: member }
+        : await resolveSub(member)
+      return sub ? subscriptionFlow(sub, bypass) : undefined
+    }),
+  )
+  const result = config.type === 'sum' ? sumFlowHeaders(flows) : flows[0]
+  // 原有配置仍允许组合字段覆盖首成员；显式新配置完全按选定来源获取。
+  if (!collection.flowSource && config.type === 'first') {
+    const custom = await safely(() =>
+      customFlow(collection.subUserinfo, bypass),
+    )
+    return [custom, result].filter(Boolean).join('; ')
+  }
+  return result
 }
 
 export function flowResponseHeaders(value: string | undefined) {

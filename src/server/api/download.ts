@@ -110,12 +110,7 @@ function downloadHandler(
             : collection
               ? await collectionFlow(
                   collection,
-                  collection.subscriptions[0]
-                    ? await getSubscription(
-                        c.env.SUKI_SUB_DB,
-                        collection.subscriptions[0],
-                      )
-                    : null,
+                  (member) => getSubscription(c.env.SUKI_SUB_DB, member),
                   options.noCache,
                 )
               : undefined

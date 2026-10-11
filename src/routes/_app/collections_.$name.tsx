@@ -29,7 +29,7 @@ import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Badge } from '#/components/ui/badge'
 import { Skeleton } from '#/components/ui/skeleton'
-import { SwitchField } from '#/components/shared/switch-field'
+import { CollectionFlowFields } from '#/components/subs/collection-flow-fields'
 import { IconField } from '#/components/shared/icon-fields'
 import { EditorLayout } from '#/components/shared/editor-layout'
 import {
@@ -88,7 +88,20 @@ function CollectionEditorPage() {
   }, [isNew, existing])
 
   const patch = (p: Partial<Collection>) =>
-    setForm((prev) => ({ ...prev, ...p }))
+    setForm((prev) => ({
+      ...prev,
+      ...p,
+      ...(p.subscriptions && prev.flowSource && !p.flowSource
+        ? {
+            flowSource: {
+              ...prev.flowSource,
+              subscriptions: prev.flowSource.subscriptions?.filter((member) =>
+                p.subscriptions?.includes(member),
+              ),
+            },
+          }
+        : {}),
+    }))
 
   const validation = useResourceValidation('collection', form)
 
@@ -219,12 +232,6 @@ function CollectionEditorPage() {
                 onChange={(e) => setTagText(e.target.value)}
               />
             </div>
-            <SwitchField
-              label="显示第一个成员的流量信息"
-              id="col-firstflow"
-              checked={form.firstSubFlow !== false}
-              onCheckedChange={(v) => patch({ firstSubFlow: v })}
-            />
             <div className="grid min-w-0 content-start gap-1.5">
               <Label htmlFor="col-remark">备注</Label>
               <Input
@@ -362,6 +369,16 @@ function CollectionEditorPage() {
               </SortableList>
             </div>
           </div>
+          <CollectionFlowFields
+            collection={form}
+            subs={subs.data || []}
+            onChange={patch}
+          />
+          <ValidationHint
+            issues={validation.issues.filter(
+              (issue) => issue.field === 'flowSource',
+            )}
+          />
           <details className="min-w-0 border-t pt-3">
             <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
               高级设置

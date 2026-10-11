@@ -25,6 +25,7 @@ import { api } from '#/lib/api'
 import {
   qk,
   refreshFlow,
+  refreshCollectionFlow,
   useCollections,
   useSortMutation,
   useSubs,
@@ -479,6 +480,20 @@ function SubsPage() {
                             name: collection.name,
                           })
                           setShareOpen(true)
+                        },
+                      },
+                      {
+                        key: 'refresh',
+                        label: '刷新流量',
+                        icon: RefreshCw,
+                        onClick: async () => {
+                          try {
+                            await refreshCollectionFlow(client, collection.name)
+                          } catch (error) {
+                            toast.error(
+                              `刷新失败:${error instanceof Error ? error.message : error}`,
+                            )
+                          }
                         },
                       },
                     ]}

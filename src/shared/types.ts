@@ -50,6 +50,13 @@ export interface Subscription {
   [key: string]: unknown
 }
 
+/** 组合流量来源；成员引用只允许指向当前组合内的订阅或 URL。 */
+export interface CollectionFlowSource {
+  type: 'first' | 'subscription' | 'sum' | 'custom' | 'none'
+  subscriptions?: string[]
+  custom?: string
+}
+
 /** 组合(对应 collections + collection_sources 表) */
 export interface Collection {
   name: string
@@ -66,6 +73,9 @@ export interface Collection {
   iconFit?: string
   /** 详情/卡片显示第一个成员的流量信息(原版 firstSubFlow) */
   firstSubFlow?: boolean
+  flowSource?: CollectionFlowSource
+  subUserinfo?: string
+  noFlow?: boolean
   remark?: string
   tag?: string[]
   [key: string]: unknown

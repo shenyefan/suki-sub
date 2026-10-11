@@ -23,6 +23,7 @@ export const qk = {
   logs: ['logs'] as const,
   env: ['env'] as const,
   flow: (name: string) => ['flow', name] as const,
+  collectionFlow: (name: string) => ['collectionFlow', name] as const,
 }
 
 export function useSubs() {
@@ -87,6 +88,28 @@ export function useFlow(name: string, enabled: boolean) {
       api.get<FlowApiResponse>(ApiRoutes.subFlow(name), signal),
     enabled,
     staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+export function useCollectionFlow(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.collectionFlow(name),
+    queryFn: ({ signal }) =>
+      api.get<FlowApiResponse>(ApiRoutes.collectionFlow(name), signal),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+export async function refreshCollectionFlow(client: QueryClient, name: string) {
+  await client.cancelQueries({ queryKey: qk.collectionFlow(name) })
+  return client.fetchQuery({
+    queryKey: qk.collectionFlow(name),
+    queryFn: ({ signal }) =>
+      api.get<FlowApiResponse>(ApiRoutes.collectionFlow(name, true), signal),
+    staleTime: 0,
     retry: false,
   })
 }

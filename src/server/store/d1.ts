@@ -212,6 +212,7 @@ export async function updateSubscriptionRow(
     statement,
     ...(r.name !== name
       ? [
+          flowSourceRefStatement(db, name, r.name),
           db
             .prepare(
               'UPDATE collection_sources SET value=?1 WHERE kind=?2 AND value=?3',
@@ -238,6 +239,27 @@ export async function deleteSubscriptionRow(
   return res.meta.changes > 0
 }
 
+/** 流量选择保存在 extra，随成员名称变更在同一批数据库写入中更新。 */
+function flowSourceRefStatement(
+  db: D1Database,
+  previous: string,
+  next?: string,
+) {
+  return db
+    .prepare(
+      `
+    UPDATE collections SET extra=json_set(extra, '$.flowSource.subscriptions', json((
+      SELECT json_group_array(CASE WHEN value=?1 THEN ?2 ELSE value END)
+      FROM json_each(collections.extra, '$.flowSource.subscriptions')
+      WHERE value<>?1 OR ?2 IS NOT NULL
+    )))
+    WHERE json_type(extra, '$.flowSource.subscriptions')='array'
+      AND EXISTS (SELECT 1 FROM json_each(collections.extra, '$.flowSource.subscriptions') WHERE value=?1)
+  `,
+    )
+    .bind(previous, next ?? null)
+}
+
 /** 删除订阅 → 从组合成员中移除 */
 export async function deleteSubscriptionRefs(
   db: D1Database,
@@ -247,6 +269,7 @@ export async function deleteSubscriptionRefs(
     db
       .prepare('DELETE FROM collection_sources WHERE kind=?1 AND value=?2')
       .bind('subscription', name),
+    flowSourceRefStatement(db, name),
   ])
 }
 

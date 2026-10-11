@@ -38,6 +38,8 @@ export const ApiRoutes = {
     `/api/subs/${encodeURIComponent(name)}/flow${noCache ? '?noCache=true' : ''}`,
   subClone: (name: string) => `/api/subs/${encodeURIComponent(name)}/clone`,
   // 组合
+  collectionFlow: (name: string, noCache = false) =>
+    `/api/collections/${encodeURIComponent(name)}/flow${noCache ? '?noCache=true' : ''}`,
   collections: '/api/collections',
   collection: (name: string) => `/api/collections/${encodeURIComponent(name)}`,
   collectionClone: (name: string) =>

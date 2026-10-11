@@ -3,7 +3,8 @@
  */
 import { resourceLabel } from '#/lib/resource-display'
 import type { Collection, Subscription } from '#/shared/types'
-import { useFlow } from '#/lib/queries'
+import { collectionFlowSource } from '#/shared/collection-flow'
+import { useCollectionFlow, useFlow } from '#/lib/queries'
 import {
   CardBadges,
   CardIcon,
@@ -67,7 +68,7 @@ export function SubCard({
   )
 }
 
-/** 组合订阅卡片：可选展示第一个成员的流量，备注优先显示。 */
+/** 组合订阅卡片：展示所选来源的流量，备注优先显示。 */
 export function CollectionCard({
   collection,
   actions,
@@ -77,13 +78,9 @@ export function CollectionCard({
   actions: CardAction[]
   moreActions: CardAction[]
 }) {
-  const firstMember = collection.subscriptions[0]
-  const firstIsSavedSub =
-    typeof firstMember === 'string' && !/^https?:\/\//.test(firstMember)
-  const flow = useFlow(
-    firstMember,
-    Boolean(collection.firstSubFlow && firstIsSavedSub),
-  )
+  const showFlow =
+    !collection.noFlow && collectionFlowSource(collection).type !== 'none'
+  const flow = useCollectionFlow(collection.name, showFlow)
   return (
     <SortableCard
       id={collection.name}
@@ -109,14 +106,14 @@ export function CollectionCard({
       content1={
         collection.remark?.trim() ? (
           collection.remark
-        ) : collection.firstSubFlow && flow.data ? (
+        ) : showFlow && flow.data ? (
           <FlowUsageLine flow={flow.data} />
         ) : (
           `${collection.subscriptions.length} 个成员`
         )
       }
       content2={
-        collection.firstSubFlow && flow.data ? (
+        showFlow && flow.data ? (
           <FlowUsageProgress flow={flow.data} />
         ) : undefined
       }
