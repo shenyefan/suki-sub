@@ -54,7 +54,7 @@ wrangler d1 migrations apply suki-sub --remote
 
 `src/server/store/d1.ts` 的映射约定:每类资源只有少数字段提升为独立列(`SPLIT` 常量:`name/url/ua/mergeSources/process` 等),**其余字段整体塞进 `extra` JSON 列**,读出时展开。这样官方(Sub-Store)字段演进不会丢数据。新增资源字段通常只需改 `src/shared/types.ts`,不必加迁移列。
 
-KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 TTL 1 小时)、流量头缓存(默认 1 分钟)等时效数据。分享 token 由 `store/tokens.ts` 存入 D1 的 `share_tokens` 表:创建、删除、重命名立即一致,次数限制通过条件更新原子递增,过期记录保留至手动删除。历史 KV 分享通过一次性数据迁移导入,运行时不再读写 KV 的 `token:<id>`。KV 最终一致,持久数据一律走 D1。
+KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 TTL 1 小时)、流量头缓存(默认 1 小时)等时效数据。分享 token 由 `store/tokens.ts` 存入 D1 的 `share_tokens` 表:创建、删除、重命名立即一致,次数限制通过条件更新原子递增,过期记录保留至手动删除。历史 KV 分享通过一次性数据迁移导入,运行时不再读写 KV 的 `token:<id>`。KV 最终一致,持久数据一律走 D1。
 
 ## 订阅处理引擎(`src/server/core/`)
 

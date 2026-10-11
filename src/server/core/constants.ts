@@ -14,6 +14,6 @@ export const SCRIPT_RESOURCE_CACHE_KEY = '#suki-sub-cached-script-resource'
 export const LOGS_KEY = '#suki-sub-logs'
 
 export const DEFAULT_CACHE_TTL = 60 * 60 * 1000 // 1 hour
-export const DEFAULT_HEADERS_CACHE_TTL = 60 * 1000 // 1 min
+export const DEFAULT_HEADERS_CACHE_TTL = 60 * 60 * 1000 // 1 小时
 export const DEFAULT_SCRIPT_CACHE_TTL = 48 * 3600 * 1000 // 48 hours
 export const DEFAULT_LOGS_MAX_COUNT = 0
