@@ -73,14 +73,14 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 ## Sub-Store 上游来源与同步记录
 
-本项目参考的是 [sub-store-org/Sub-Store](https://github.com/sub-store-org/Sub-Store)，不是 Substack。运行时执行本仓库的 TypeScript 引擎，不会自动拉取或运行上游最新脚本。
+本项目参考的是 [sub-store-org/Sub-Store](https://github.com/sub-store-org/Sub-Store)。运行时执行本仓库的 TypeScript 引擎，不会自动拉取或运行上游最新脚本。
 
 ### 当前核对基准
 
 - 核对日期：2026-10-11。
 - 上游分支：`master`；GitHub API 实时读取的 HEAD 为 [`a3e61061e50b40e5c5938969aab915d05d8d7069`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069)，提交日期 2026-10-06，版本 `2.42.3`。
-- **这是核对基准，不是已全量同步基线。** 本地没有可靠的原始移植 SHA 记录，且下表仍有待同步变更，不能把当前引擎标记为已同步至这个 commit。
-- 本次仅核对源码并登记差异，没有修改引擎实现。以后实际同步后，应更新模块状态和已同步 commit，不要仅因下载了最新源码就推进同步记录。
+- **这是核对基准，不是已全量同步基线。** 本地没有可靠的原始移植 SHA 记录，本次按功能同步下表 5 项并校验；未对整个上游仓库做全量替换，不能把当前引擎标记为完整移植了这个 commit。
+- 2026-10-11 已同步下表 5 项引擎更新，使用实际 `ProxyUtils` 的解析、产出和往返样例校验。以后新增同步后，应更新模块状态和已同步 commit，不要仅因下载了最新源码就推进同步记录。
 
 ### 源文件对应关系
 
@@ -103,15 +103,15 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 上游 [Loon 资源解析器脚本](https://github.com/sub-store-org/Sub-Store/blob/master/backend/src/products/resource-parser.loon.js) 是给 Loon 客户端执行的入口，引用同一套 `ProxyUtils` / `RuleUtils`。本项目没有直接部署这个脚本，而是在 Workers 中移植上述核心源码。上游 `backend/src/products/proxy-utils.esm.js` 也只是导出 `ProxyUtils.parse/produce` 的入口，不是本项目应直接覆盖的解析器。`scripts/demo.js` 是上游演示脚本，不是生产引擎。
 
-### 本次发现的待同步项
+### 本次已同步的上游更新
 
 | 上游 commit | 更新 | 本地核对结果与同步位置 |
 | --- | --- | --- |
-| [`a3e61061e50b`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069) | sing-box TLS `certificate_sha256` | 未同步。`producers/sing-box.ts` 仍丢弃普通证书指纹；上游已支持显式指纹和十六进制转 Base64，增加证书配置冲突检查及 Reality 处理 |
-| [`e08f1b19f436`](https://github.com/sub-store-org/Sub-Store/commit/e08f1b19f436) | Loon TLS profile | 未同步。需一起更新 `proxy-utils/index.ts`、`producers/loon.ts` 和 `grammars/loon.peggy`；本地仍使用 `ios18/ios26`，上游改为 `safari-ios18/safari-ios-26` 等并调整指纹映射 |
-| [`04f44c2ae24d`](https://github.com/sub-store-org/Sub-Store/commit/04f44c2ae24d) | sing-box SSH 私钥 | 未同步。`producers/sing-box.ts` 仍把私钥正文当路径；上游按 `PRIVATE KEY` 区分 `private_key` 与 `private_key_path` |
-| [`7b9d822722dd`](https://github.com/sub-store-org/Sub-Store/commit/7b9d822722dd) | SS URI UDP 开关 | 未同步。`parsers/index.ts` 仍用字符串真值，`udp=0/false/off` 会误开启；`producers/uri.ts` 缺少 `udp=0/1` 输出 |
-| [`104c941656eb`](https://github.com/sub-store-org/Sub-Store/commit/104c941656eb) | sing-box WireGuard / Tailscale 字段 | 未同步。`producers/sing-box.ts` 缺少 `_on_demand`、`_listen_port`、`_name`、UDP 映射/过滤、`_udp_nat_max`、`_taildrop_directory` 等映射及边界校验 |
+| [`a3e61061e50b`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069) | sing-box TLS `certificate_sha256` | 已同步 `producers/sing-box.ts`：支持显式指纹、十六进制转 Base64、证书配置冲突检查和 Reality 处理；ShadowTLS 共用证书处理 |
+| [`e08f1b19f436`](https://github.com/sub-store-org/Sub-Store/commit/e08f1b19f436) | Loon TLS profile | 已同步 `proxy-utils/index.ts`、`producers/loon.ts` 和 `grammars/loon.peggy`：使用上游 profile 名称和指纹映射，保留显式 ML-KEM 设置；用 Peggy 5.1.0 重新生成 `loon.gen.ts`，保留 `@ts-nocheck` |
+| [`04f44c2ae24d`](https://github.com/sub-store-org/Sub-Store/commit/04f44c2ae24d) | sing-box SSH 私钥 | 已同步 `producers/sing-box.ts`：按 `PRIVATE KEY` 区分私钥正文 `private_key` 与文件路径 `private_key_path` |
+| [`7b9d822722dd`](https://github.com/sub-store-org/Sub-Store/commit/7b9d822722dd) | SS URI UDP 开关 | 已同步 `parsers/index.ts` 与 `producers/uri.ts`：`udp=0/false/off` 禁用，未指定默认开启；输出携带 `udp=0/1` 并校验往返结果 |
+| [`104c941656eb`](https://github.com/sub-store-org/Sub-Store/commit/104c941656eb) | sing-box WireGuard / Tailscale 字段 | 已同步 `producers/sing-box.ts`：新增 `_on_demand`、`_listen_port`、`_name`、UDP 映射/过滤、`_udp_nat_max`、`_taildrop_directory` 映射及类型、范围校验 |
 
 已具备的近期能力：Loon `server-dns`（`8c2a695663b2`）、Loon `chrome147`（`07d94ef9e197`）、VLESS URI `finalmask`（`18dfe4c07287`）。这不代表整个对应模块与最新上游一致。
 

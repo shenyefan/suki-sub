@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import ClashMeta_Producer from './clashmeta'
 import $ from '#/server/core/app'
 import { isPlainObject } from '#/server/core/utils/index'
@@ -322,6 +323,55 @@ const getSingBoxUtlsFingerprint = (value: any) => {
   if (singBoxUtlsFingerprints.includes(fingerprint)) return fingerprint
 }
 
+const tlsCertificateParser = (proxy: any, parsedProxy: any) => {
+  const tls = parsedProxy.tls
+  if (proxy.ca) tls.certificate_path = `${proxy.ca}`
+  if (proxy.ca_str) tls.certificate = [proxy.ca_str]
+  if (proxy['ca-str']) tls.certificate = [proxy['ca-str']]
+  if (proxy._certificate) tls.certificate = proxy._certificate
+  if (proxy._certificate_path) tls.certificate_path = proxy._certificate_path
+  if (tls.reality?.enabled) {
+    if (
+      proxy._certificate_sha256?.length ||
+      proxy._certificate_public_key_sha256?.length
+    ) {
+      $.warn(
+        `sing-box 节点 ${proxy.name}：Reality 不使用证书及公钥 SHA-256 指纹`,
+      )
+    }
+    return
+  }
+  if (proxy._certificate_public_key_sha256)
+    tls.certificate_public_key_sha256 = proxy._certificate_public_key_sha256
+  const hasCertificate = tls.certificate?.length || tls.certificate_path
+  if (proxy._certificate_sha256 != null) {
+    tls.certificate_sha256 = proxy._certificate_sha256
+  } else if (
+    (proxy.fingerprint || proxy['tls-fingerprint']) &&
+    !hasCertificate &&
+    !tls.certificate_public_key_sha256?.length
+  ) {
+    const hex = `${proxy.fingerprint || proxy['tls-fingerprint']}`
+      .trim()
+      .replace(/:/g, '')
+    if (!/^[0-9a-f]{64}$/i.test(hex)) {
+      throw new Error(
+        `sing-box 节点 ${proxy.name}：证书 SHA-256 指纹必须为 64 位十六进制`,
+      )
+    }
+    tls.certificate_sha256 = [Buffer.from(hex, 'hex').toString('base64')]
+  }
+  if (
+    hasCertificate &&
+    (tls.certificate_sha256?.length ||
+      tls.certificate_public_key_sha256?.length)
+  ) {
+    throw new Error(
+      `sing-box 节点 ${proxy.name}：证书 SHA-256 指纹不能与证书正文或证书路径同时设置`,
+    )
+  }
+}
+
 const tlsParser = (proxy: any, parsedProxy: any) => {
   if (proxy.tls) parsedProxy.tls.enabled = true
   if (proxy.servername && proxy.servername !== '')
@@ -334,9 +384,6 @@ const tlsParser = (proxy: any, parsedProxy: any) => {
   if (typeof proxy.alpn === 'string') {
     parsedProxy.tls.alpn = [proxy.alpn]
   } else if (Array.isArray(proxy.alpn)) parsedProxy.tls.alpn = proxy.alpn
-  if (proxy.ca) parsedProxy.tls.certificate_path = `${proxy.ca}`
-  if (proxy.ca_str) parsedProxy.tls.certificate = [proxy.ca_str]
-  if (proxy['ca-str']) parsedProxy.tls.certificate = [proxy['ca-str']]
   if (proxy['reality-opts']) {
     parsedProxy.tls.reality = { enabled: true }
     if (proxy['reality-opts']['public-key'])
@@ -384,12 +431,6 @@ const tlsParser = (proxy: any, parsedProxy: any) => {
     parsedProxy.tls.fragment_fallback_delay = proxy['_fragment_fallback_delay']
   if (proxy['_record_fragment'])
     parsedProxy.tls.record_fragment = !!proxy['_record_fragment']
-  if (proxy['_certificate']) parsedProxy.tls.certificate = proxy['_certificate']
-  if (proxy['_certificate_path'])
-    parsedProxy.tls.certificate_path = proxy['_certificate_path']
-  if (proxy['_certificate_public_key_sha256'])
-    parsedProxy.tls.certificate_public_key_sha256 =
-      proxy['_certificate_public_key_sha256']
   if (proxy['_client_certificate'])
     parsedProxy.tls.client_certificate = proxy['_client_certificate']
   if (proxy['_client_certificate_path'])
@@ -399,19 +440,7 @@ const tlsParser = (proxy: any, parsedProxy: any) => {
     parsedProxy.tls.client_key_path = proxy['_client_key_path']
   if (!parsedProxy.tls.enabled) {
     delete parsedProxy.tls
-  } else if (
-    (proxy.fingerprint || proxy['tls-fingerprint']) &&
-    !parsedProxy.tls.reality &&
-    !parsedProxy.tls.certificate &&
-    !parsedProxy.tls.certificate_path &&
-    !parsedProxy.tls.certificate_public_key_sha256
-  ) {
-    // sing-box can only pin the SHA-256 of the certificate public key
-    // https://sing-box.sagern.org/configuration/shared/tls/#certificate_public_key_sha256
-    $warn(
-      `Platform sing-box does not support certificate fingerprint pinning, it is dropped for proxy ${proxy.name}. Set _certificate_public_key_sha256 to pin the certificate public key instead`,
-    )
-  }
+  } else tlsCertificateParser(proxy, parsedProxy)
 }
 
 const sshParser = (proxy: any = {}): any => {
@@ -427,8 +456,13 @@ const sshParser = (proxy: any = {}): any => {
   if (proxy.password) parsedProxy.password = proxy.password
   // https://wiki.metacubex.one/config/proxies/ssh
   // https://sing-box.sagern.org/zh/configuration/outbound/ssh
-  if (proxy['privateKey']) parsedProxy.private_key_path = proxy['privateKey']
-  if (proxy['private-key']) parsedProxy.private_key_path = proxy['private-key']
+  const privateKey = proxy['private-key'] || proxy.privateKey
+  if (privateKey) {
+    // 与 mihomo 一致，私钥正文和文件路径分别传给客户端。
+    parsedProxy[
+      privateKey.includes('PRIVATE KEY') ? 'private_key' : 'private_key_path'
+    ] = privateKey
+  }
   if (proxy['private-key-passphrase'])
     parsedProxy.private_key_passphrase = proxy['private-key-passphrase']
   if (proxy['server-fingerprint']) {
@@ -593,6 +627,7 @@ const shadowTLSOutboundParser = (proxy: any = {}, pluginOpts: any): any => {
   if (stPart.server_port < 0 || stPart.server_port > 65535) throw '端口值非法'
   const alpn = normalizeALPN(pluginOpts.alpn) ?? normalizeALPN(proxy.alpn)
   if (alpn) stPart.tls.alpn = alpn
+  tlsCertificateParser(proxy, stPart)
   if (proxy['fast-open'] === true) stPart.udp_fragment = true
   tfoParser(proxy, stPart)
   detourParser(proxy, stPart)
@@ -1132,9 +1167,18 @@ const anytlsParser = (
 }
 const tailscaleParser = (proxy: any = {}): any => {
   const useControlHTTPClient = hasControlHTTPClient(proxy)
+  const listenPort = parseSafeIntegerValue(proxy._listen_port)
   const parsedProxy: any = {
     tag: proxy.name,
     type: 'tailscale',
+    listen_port:
+      listenPort != null && listenPort <= 65535 ? listenPort : undefined,
+    taildrop_directory:
+      typeof proxy._taildrop_directory === 'string'
+        ? proxy._taildrop_directory
+        : undefined,
+    on_demand:
+      typeof proxy._on_demand === 'boolean' ? proxy._on_demand : undefined,
     control_http_client: proxy['control-http-client'],
     udp_timeout: proxy['udp-timeout'],
     state_directory: proxy['state-dir'] || proxy['state-directory'],
@@ -1192,8 +1236,17 @@ const wireguardParser = (proxy: any = {}): any => {
   const address = ['ipv4', 'ipv6']
     .map((family) => getWireGuardAddressWithCIDR(proxy, family))
     .filter((i) => i)
+  const listenPort = parseSafeIntegerValue(proxy._listen_port)
+  const udpNatMax = parseSafeIntegerValue(proxy._udp_nat_max)
   const parsedProxy: any = {
     system: !!proxy.system,
+    name: typeof proxy._name === 'string' ? proxy._name : undefined,
+    listen_port:
+      listenPort != null && listenPort <= 65535 ? listenPort : undefined,
+    on_demand:
+      typeof proxy._on_demand === 'boolean' ? proxy._on_demand : undefined,
+    udp_nat_max:
+      udpNatMax != null && udpNatMax <= 4294967295 ? udpNatMax : undefined,
     mtu: proxy.mtu ? parseInt(`${proxy.mtu}`, 10) : undefined,
     udp_timeout: proxy['udp-timeout'],
     workers: proxy['workers'] ? parseInt(`${proxy['workers']}`, 10) : undefined,
@@ -1206,6 +1259,17 @@ const wireguardParser = (proxy: any = {}): any => {
     peer_public_key: proxy['public-key'],
     pre_shared_key: proxy['pre-shared-key'],
     reserved: [],
+  }
+  for (const field of ['udp_mapping', 'udp_filtering']) {
+    if (
+      [
+        'endpoint_independent',
+        'address_dependent',
+        'address_and_port_dependent',
+      ].includes(proxy[`_${field}`])
+    ) {
+      parsedProxy[field] = proxy[`_${field}`]
+    }
   }
   if (parsedProxy.server_port < 0 || parsedProxy.server_port > 65535)
     throw 'invalid port'
