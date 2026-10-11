@@ -88,7 +88,11 @@ export async function getFlowHeaders(
   ) || {}) as any
   const userAgent =
     String(
-      ua || defaultFlowUserAgent || defaultUserAgent || 'clash.meta/v1.19.23',
+      $arguments?.flowUserAgent ||
+        ua ||
+        defaultFlowUserAgent ||
+        defaultUserAgent ||
+        'clash.meta/v1.19.23',
     ).trim() || 'clash.meta/v1.19.23'
   const requestTimeout = timeout || defaultTimeout || 8000
   let customHeaders: any
@@ -121,7 +125,7 @@ export async function getFlowHeaders(
     }
   }
   const id = hex_md5(
-    `${customHeaders ? JSON.stringify(customHeaders) : userAgent}${url}`,
+    `${flowUrl ? 'GET:' : ''}${customHeaders ? JSON.stringify(customHeaders) : userAgent}${url}`,
   )
   const cached = await headersResourceCache.get(id)
   let flowInfo

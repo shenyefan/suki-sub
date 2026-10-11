@@ -1,18 +1,29 @@
 import { setResourceContext } from '../store/resource-context'
 /**
- * 订阅下载:平台解析(query target/platform → UA 嗅探 → JSON)、流量头透传、
+ * 订阅下载:平台解析(路径 → query platform/target → UA 与 Accept)、流量头透传、
  * response-transformer 与 age 输出加密后处理，分享标识绑定具体订阅。
  */
 import { Hono } from 'hono'
-import $ from '../core/app'
 import type { Context } from 'hono'
 import { errorResponse, failureResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
 import { getToken, consumeToken } from '../store/tokens'
 import { produceArtifact } from '../core/produce-artifact'
 import { applyResponseTransformers } from '../core/response-transformer'
-import { applyAgeOutputEncryption } from '../core/age-output'
-import { getFlowHeaders, normalizeFlowHeader } from '../core/utils/flow'
+import {
+  applyAgeOutputEncryption,
+  createAgePublicKeyConfig,
+  resolveAgePublicKey,
+  SHARE_AGE_PUBLIC_KEY_HEADER,
+} from '../core/age-output'
+import { downloadMetadata } from './download-metadata'
+import { downloadOptions, scriptOptions } from './download-options'
+import {
+  subscriptionFlow,
+  collectionFlow,
+  flowResponseHeaders,
+} from './download-flow'
+import type { TokenItem } from '#/shared/types'
 import { getCollection, getSubscription } from '../store/d1'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -33,75 +44,47 @@ function createResAdapter() {
       return Object.fromEntries(headers.entries())
     },
     status(code: number) {
-      adapter.statusCode = code
+      if (Number.isInteger(code) && code >= 200 && code <= 599)
+        adapter.statusCode = code
       return adapter
     },
   }
   return adapter
 }
 
-const UA_PLATFORMS: [RegExp, string][] = [
-  [/clash(?:\.meta| veronica)?/i, 'clashmeta'],
-  [/clash/i, 'clash'],
-  [/stash/i, 'stash'],
-  [/surge\/\d+(\.\d+)* mac/i, 'surgemac'],
-  [/surge/i, 'surge'],
-  [/surfboard/i, 'surfboard'],
-  [/loon/i, 'loon'],
-  [/shadowrocket/i, 'shadowrocket'],
-  [/quantumult%20x|quantumult-x|qx/i, 'qx'],
-  [/sing-box|singbox/i, 'sing-box'],
-  [/egern/i, 'egern'],
-  [/v2ray\/?\d*/i, 'v2ray'],
-]
-
-function detectPlatform(ua: string | undefined): string | undefined {
-  if (!ua) return undefined
-  for (const [re, platform] of UA_PLATFORMS) {
-    if (re.test(ua)) return platform
-  }
-  return undefined
-}
-
-function resolvePlatform(c: {
-  req: {
-    param: (k: string) => string | undefined
-    query: (k: string) => string | undefined
-    header: (k: string) => string | undefined
-  }
-}): string {
-  // 分享链接的目标平台优先，其次 query，再按客户端自动识别
-  const pathTarget = c.req.param('target')
-  if (pathTarget) return pathTarget
-  return (
-    c.req.query('target') ||
-    c.req.query('platform') ||
-    detectPlatform(c.req.header('user-agent')) ||
-    'JSON'
-  )
-}
-
-function downloadHandler(kind: 'subscription' | 'collection', name: string) {
+function downloadHandler(
+  kind: 'subscription' | 'collection',
+  name: string,
+  share: TokenItem,
+) {
   return (c: Context<{ Bindings: Env }>) =>
     withApiStore(c.env, async () => {
       try {
-        const platform = resolvePlatform(c)
-        const opt: Record<string, unknown> = {
-          type: kind,
-          name,
-          platform,
-          ua: c.req.header('user-agent'),
-          noFlow:
-            c.req.query('noFlow') === 'true' || c.req.query('noFlow') === '1',
-        }
+        const options = downloadOptions(
+          c.req.query(),
+          c.req.param('target'),
+          c.req.header('user-agent') || '',
+          c.req.header('accept'),
+        )
+        const { platform } = options
+        const $options = scriptOptions(c.req.query('$options'), {
+          method: c.req.method,
+          url: c.req.url,
+          path: c.req.path,
+          query: c.req.query(),
+          params: c.req.param(),
+          headers: Object.fromEntries(c.req.raw.headers.entries()),
+        })
+        const opt = { ...options, type: kind, name, $options }
         const sub =
           kind === 'subscription'
             ? await getSubscription(c.env.SUKI_SUB_DB, name)
             : null
-        const resource =
-          kind === 'subscription'
-            ? sub
-            : await getCollection(c.env.SUKI_SUB_DB, name)
+        const collection =
+          kind === 'collection'
+            ? await getCollection(c.env.SUKI_SUB_DB, name)
+            : null
+        const resource = sub || collection
         if (resource)
           setResourceContext(
             c,
@@ -120,70 +103,84 @@ function downloadHandler(kind: 'subscription' | 'collection', name: string) {
         const output = await produceArtifact(opt)
 
         const res = createResAdapter()
-        // 流量信息头
-        if (sub && !opt.noFlow) {
-          try {
-            const flowInfo =
-              sub.source !== 'local' && sub.url?.trim()
-                ? await getFlowHeaders(
-                    sub.url,
-                    sub.ua ?? undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                  )
-                : undefined
-            if (sub.subUserinfo || flowInfo) {
-              const normalized = normalizeFlowHeader(
-                [sub.subUserinfo, flowInfo].filter((i) => i).join(';'),
-                true,
-              ) as Record<string, string>
-              if (normalized['subscription-userinfo'])
-                res.set(
-                  'subscription-userinfo',
-                  normalized['subscription-userinfo'],
+        const noFlow = options.noFlow || resource?.noFlow === true
+        if (!noFlow) {
+          const flowInfo = sub
+            ? await subscriptionFlow(sub, options.noCache)
+            : collection
+              ? await collectionFlow(
+                  collection,
+                  collection.subscriptions[0]
+                    ? await getSubscription(
+                        c.env.SUKI_SUB_DB,
+                        collection.subscriptions[0],
+                      )
+                    : null,
+                  options.noCache,
                 )
-              if (normalized['profile-web-page-url'])
-                res.set(
-                  'profile-web-page-url',
-                  normalized['profile-web-page-url'],
-                )
-              if (normalized['plan-name'])
-                res.set('plan-name', normalized['plan-name'])
-            }
-          } catch (err) {
-            $.warn(
-              '流量信息暂不可用',
-              err instanceof Error ? err.message : String(err),
-            )
+              : undefined
+          for (const [key, value] of Object.entries(
+            flowResponseHeaders(flowInfo),
+          )) {
+            if (value) res.set(key, value)
           }
         }
-
-        res.set(
-          'content-type',
-          platform === 'JSON'
-            ? 'application/json;charset=utf-8'
-            : 'text/plain; charset=utf-8',
-        )
+        const encryptionConfigs = [
+          createAgePublicKeyConfig(
+            share['age-public-key'] ||
+              share.agePublicKey ||
+              c.req.header(SHARE_AGE_PUBLIC_KEY_HEADER),
+          ),
+          resource || {},
+        ]
+        for (const [key, value] of Object.entries(
+          downloadMetadata(
+            resource?.displayName?.trim() || name,
+            platform,
+            options.produceType,
+            !!resolveAgePublicKey(...encryptionConfigs),
+          ),
+        ))
+          res.set(key, value)
+        const customResponse = $options._res as
+          { headers?: Record<string, unknown>; status?: unknown } | undefined
+        if (customResponse?.headers) {
+          for (const [key, value] of Object.entries(customResponse.headers)) {
+            if (value == null) res.removeHeader(key)
+            else res.set(key, String(value))
+          }
+        }
+        const status = Number(customResponse?.status)
+        if (Number.isInteger(status) && status >= 200 && status <= 599)
+          res.status(status)
 
         // response-transformer 与 age 输出加密(脚本型 transformer 走沙箱,引擎内部处理)
         const body = await applyResponseTransformers({
           res,
-          body: output,
+          body: typeof output === 'string' ? output : JSON.stringify(output),
           process: resource?.process,
           targetPlatform: platform,
           source: resource ? { [name]: resource } : {},
+          $options,
+          executionContext: { noFlow },
         })
         const finalBody = await applyAgeOutputEncryption({
           res,
           body,
-          configs: [resource ?? {}],
+          configs: encryptionConfigs,
         })
 
-        return new Response(finalBody as BodyInit, {
-          status: res.statusCode,
-          headers: res.headers,
-        })
+        return new Response(
+          [204, 205, 304].includes(res.statusCode)
+            ? null
+            : typeof finalBody === 'string' || finalBody == null
+              ? finalBody
+              : JSON.stringify(finalBody),
+          {
+            status: res.statusCode,
+            headers: res.headers,
+          },
+        )
       } catch (err) {
         return errorResponse(c, err)
       }
@@ -205,6 +202,7 @@ async function shareHandler(c: Context<{ Bindings: Env }>) {
   return downloadHandler(
     share.type === 'sub' ? 'subscription' : 'collection',
     share.name,
+    share,
   )(c)
 }
 

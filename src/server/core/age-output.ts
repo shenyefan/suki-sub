@@ -16,7 +16,9 @@ function createAgePublicKeyConfig(publicKey: any) {
 
 function resolveAgePublicKey(...configs: any[]) {
   for (const config of configs) {
-    const key = normalizeAgePublicKey(config?.[AGE_PUBLIC_KEY])
+    const key = normalizeAgePublicKey(
+      config?.[AGE_PUBLIC_KEY] || config?.agePublicKey,
+    )
     if (key) return key
   }
 
@@ -41,7 +43,9 @@ function resolveShareAgeConfig({ req, type, name, findShareToken }: any) {
       : null)
   const headerKey = req.headers?.[SHARE_AGE_PUBLIC_KEY_HEADER]
 
-  return createAgePublicKeyConfig(token?.[AGE_PUBLIC_KEY] || headerKey)
+  return createAgePublicKeyConfig(
+    token?.[AGE_PUBLIC_KEY] || token?.agePublicKey || headerKey,
+  )
 }
 
 async function applyAgeOutputEncryption({ body, res, configs = [] }: any) {

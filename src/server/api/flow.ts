@@ -2,6 +2,7 @@
  * 流量信息与 age 密钥工具。
  */
 import { Hono } from 'hono'
+import { isLinkFlagEnabled, parseResourceLink } from '#/shared/resource-link'
 import { errorResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
 import { getSubscription } from '../store/d1'
@@ -22,14 +23,15 @@ app.get('/api/subs/:name/flow', async (c) =>
     try {
       const name = c.req.param('name')
       const urlArg = c.req.query('url')
-      const noCache = c.req.query('noCache') === 'true'
       const sub = await getSubscription(c.env.SUKI_SUB_DB, name)
       if (!sub)
         throw new ResourceNotFoundError(
           'RESOURCE_NOT_FOUND',
           `Subscription ${name} does not exist!`,
         )
-      if (c.req.query('noFlow') === 'true' || sub.noFlow) {
+      const noCache =
+        isLinkFlagEnabled(c.req.query('noCache')) || sub.noCache === true
+      if (isLinkFlagEnabled(c.req.query('noFlow')) || sub.noFlow) {
         throw new RequestInvalidError(
           'NO_FLOW_INFO',
           `Subscription ${name}: noFlow`,
@@ -50,7 +52,7 @@ app.get('/api/subs/:name/flow', async (c) =>
             sub.subUserinfo,
             undefined,
             undefined,
-            undefined,
+            sub.subUserinfo,
             undefined,
             noCache,
           )
@@ -69,14 +71,15 @@ app.get('/api/subs/:name/flow', async (c) =>
           'NO_FLOW_INFO',
           `Subscription ${name}: noFlow`,
         )
+      const flowArgs = parseResourceLink(firstUrl).arguments
       let flowHeaders: string | undefined
       try {
         flowHeaders = await getFlowHeaders(
           firstUrl,
-          sub.ua ?? undefined,
+          flowArgs.flowUserAgent || sub.ua,
           undefined,
-          undefined,
-          undefined,
+          flowArgs.flowUrl,
+          flowArgs.flowHeaders,
           noCache,
         )
       } catch (err) {
@@ -95,7 +98,7 @@ app.get('/api/subs/:name/flow', async (c) =>
           sub.subUserinfo,
           undefined,
           undefined,
-          undefined,
+          sub.subUserinfo,
           undefined,
           noCache,
         )

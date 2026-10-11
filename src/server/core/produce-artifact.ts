@@ -424,7 +424,7 @@ async function produceArtifact({
                         undefined,
                         undefined,
                         undefined,
-                        noCache || sub.noCache,
+                        noCache || collection.noCache || sub.noCache,
                         true,
                         {
                           returnRaw: true,

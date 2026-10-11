@@ -1,3 +1,4 @@
+import { contentDisposition } from './download-metadata'
 import { setResourceContext } from '../store/resource-context'
 import isEqual from 'lodash/isEqual.js'
 import { validateForSave } from '../core/preview-process'
@@ -104,7 +105,9 @@ app.get('/api/subs/:name', async (c) =>
         return new Response(JSON.stringify(sub, null, 2), {
           headers: {
             'content-type': 'application/json',
-            'content-disposition': `attachment; filename="${encodeURIComponent(`suki-sub_subscription_${sub.name}.json`)}"`,
+            'content-disposition': contentDisposition(
+              `suki-sub_subscription_${sub.name}.json`,
+            ),
           },
         })
       }
