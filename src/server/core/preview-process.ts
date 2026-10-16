@@ -1,4 +1,8 @@
 import {
+  assertNotificationMode,
+  isNotificationOnlyChange,
+} from '../notifications/resource-settings'
+import {
   assertResourceValid,
   contextualResourceError,
 } from './validate-resource'
@@ -83,7 +87,12 @@ export async function previewProcess(
 export async function validateForSave(
   kind: 'sub' | 'collection',
   draft: Subscription | Collection,
+  previous?: Subscription | Collection,
 ) {
+  if (previous && isNotificationOnlyChange(previous, draft)) {
+    assertNotificationMode(draft.telegramNotificationMode)
+    return
+  }
   assertResourceValid(kind, draft)
   try {
     await previewProcess(kind, draft, true)

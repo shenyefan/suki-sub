@@ -1,3 +1,4 @@
+import { lastTelegramFailure } from '../store/logs'
 import isEqual from 'lodash/isEqual.js'
 /**
  * 设置读写与资源排序。
@@ -24,6 +25,9 @@ app.get('/api/settings', async (c) =>
       return c.json({
         ...(await getAllSettings(c.env.SUKI_SUB_DB)),
         telegramConfiguration: telegramConfigurationState(c.env),
+        telegramLastFailure: await lastTelegramFailure(c.env.SUKI_SUB_DB).catch(
+          () => null,
+        ),
       })
     } catch (err) {
       return errorResponse(c, err)
@@ -36,6 +40,16 @@ app.patch('/api/settings', async (c) =>
     try {
       const patch = await c.req.json()
       delete patch.telegramConfiguration
+      delete patch.telegramLastFailure
+      if (
+        patch.telegramEnabled != null &&
+        typeof patch.telegramEnabled !== 'boolean'
+      )
+        throw new RequestInvalidError(
+          'INVALID_NOTIFICATION_MODE',
+          '通知总开关必须是开启或关闭',
+          { field: 'telegramEnabled' },
+        )
       for (const key of [
         'telegramNotificationMode',
         ...TELEGRAM_NOTIFICATIONS.map((item) => item.key),
@@ -55,7 +69,7 @@ app.patch('/api/settings', async (c) =>
       const current = await getAllSettings(c.env.SUKI_SUB_DB)
       const next = { ...current, ...patch }
       const categories = [
-        { key: 'telegramNotificationMode', label: '通知总范围' },
+        { key: 'telegramNotificationMode', label: '通知总开关' },
         ...TELEGRAM_NOTIFICATIONS,
       ]
       const notificationChanges = categories.flatMap((item) => {
@@ -93,6 +107,9 @@ app.patch('/api/settings', async (c) =>
       return c.json({
         ...(await getAllSettings(c.env.SUKI_SUB_DB)),
         telegramConfiguration: telegramConfigurationState(c.env),
+        telegramLastFailure: await lastTelegramFailure(c.env.SUKI_SUB_DB).catch(
+          () => null,
+        ),
       })
     } catch (err) {
       return errorResponse(c, err)

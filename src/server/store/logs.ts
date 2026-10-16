@@ -273,6 +273,22 @@ export async function listServerLogs(db: D1Database): Promise<LogEntry[]> {
   })
 }
 
+/** 设置页只读取最近一次推送失败摘要，不把运行状态混进持久设置。 */
+export async function lastTelegramFailure(
+  db: D1Database,
+): Promise<string | null> {
+  await ensureLogSchema(db)
+  const row = await db
+    .prepare(
+      "SELECT time, details FROM runtime_logs WHERE json_extract(details, '$.action') = 'notification.telegram' ORDER BY time DESC, id DESC LIMIT 1",
+    )
+    .first<{ time: string; details: string }>()
+  if (!row) return null
+  const details = JSON.parse(row.details) as Record<string, unknown>
+  const reason = redactDiagnostic(details.reason ?? '详情请查看日志')
+  return `${row.time} · ${reason}`
+}
+
 export async function clearServerLogs(db: D1Database): Promise<void> {
   await ensureLogSchema(db)
   await db.prepare('DELETE FROM runtime_logs').run()

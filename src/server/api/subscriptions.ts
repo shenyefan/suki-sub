@@ -149,7 +149,7 @@ app.patch('/api/subs/:name', async (c) =>
         )
       setResourceContext(c, 'sub', merged)
       c.set('operationUnchanged' as never, isEqual(old, merged) as never)
-      await validateForSave('sub', merged)
+      await validateForSave('sub', merged, old)
       try {
         await updateSubscriptionRow(
           c.env.SUKI_SUB_DB,

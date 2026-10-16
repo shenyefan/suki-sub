@@ -36,6 +36,16 @@ export function validateResource(
     resourceName === 'UNTITLED'
   )
     add('name', '名称不能为空、不能包含 /，且不能使用 UNTITLED')
+  if (
+    draft.telegramNotificationMode != null &&
+    !['inherit', 'off', 'errors', 'all'].includes(
+      String(draft.telegramNotificationMode),
+    )
+  )
+    add(
+      'telegramNotificationMode',
+      '拉取通知必须是跟随全局、关闭、仅异常或全部',
+    )
   const validUrl = (linkValue: string) => {
     try {
       const url = new URL(parseResourceLink(linkValue).url)

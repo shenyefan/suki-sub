@@ -2,13 +2,11 @@ import { BaseError, errorMessage } from '../core/errors'
 import { writeServerEvent, sanitizeLogValue } from '../store/logs'
 import { redactDiagnostic } from '../core/utils/diagnostics'
 import { LOG_ACTION_LABELS } from '#/shared/logs'
-import {
-  TELEGRAM_NOTIFICATIONS,
-  telegramMasterMode,
-  telegramCategoryMode,
-  telegramOperationCategory,
-} from '#/shared/telegram-notifications'
+import { telegramOperationCategory } from '#/shared/telegram-notifications'
 import { getAllSettings } from '../store/d1'
+import { claimNotification } from './cooldown'
+import { isNotificationFailure, selectTelegramNotification } from './policy'
+import type { NotificationRequest } from './policy'
 import type { ServerLog } from '../store/logs'
 import type { Settings, Subscription, Collection } from '#/shared/types'
 
@@ -100,8 +98,7 @@ export function telegramConfigurationState(
   }
 }
 
-const failed = (entry: ServerLog) =>
-  entry.level === 'error' || Number(entry.details?.httpStatus) >= 400
+const failed = isNotificationFailure
 
 const resourceKinds: Record<string, string> = {
   sub: '订阅',
@@ -109,27 +106,6 @@ const resourceKinds: Record<string, string> = {
   module: '脚本模块',
   share: '分享',
 }
-const fieldLabels: Record<string, string> = {
-  name: '名称',
-  url: '订阅链接',
-  content: '本地内容',
-  subscriptions: '组合成员',
-  process: '节点操作',
-  gistToken: '备份访问 Token',
-  gistBackupName: '备份名称',
-  syncPlatform: '备份平台',
-  createItemPosition: '新建位置',
-  telegramEnabled: '通知总范围',
-  telegramNotificationMode: '通知总范围',
-}
-Object.assign(
-  fieldLabels,
-  Object.fromEntries(
-    TELEGRAM_NOTIFICATIONS.map((item) => [item.key, item.label + '通知']),
-  ),
-)
-const formatDuration = (ms: number) =>
-  ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
 const actionLabel = (action: unknown) => {
   const key = String(action ?? '')
   return (
@@ -152,7 +128,7 @@ const escapeTelegram = (value: unknown, limit = 300) => {
     .replace(/>/g, '&gt;')
 }
 
-/** 明确谁在何时对哪个资源做了什么，错误附来源、操作与定位信息。 */
+/** 推送仅展示结果摘要，完整诊断使用请求编号在日志页查阅。 */
 export function formatTelegramEvent(entry: ServerLog): string {
   const d = entry.details ?? {}
   const outcome = failed(entry)
@@ -185,16 +161,6 @@ export function formatTelegramEvent(entry: ServerLog): string {
   )
   if (name && displayName && name !== displayName) field('资源名称', name, 120)
   if (d.previousName) field('名称变更', `${d.previousName} → ${name}`, 250)
-  field(
-    '执行者',
-    d.userName ||
-      (d.action === 'backup.scheduled'
-        ? '定时任务'
-        : d.action === 'subscription.download'
-          ? '订阅客户端'
-          : '未识别用户'),
-    100,
-  )
   const time = new Date(entry.time)
   if (!Number.isNaN(time.getTime()))
     field(
@@ -226,92 +192,16 @@ export function formatTelegramEvent(entry: ServerLog): string {
       '备份内容',
       `${d.subscriptionCount} 个订阅、${d.collectionCount ?? 0} 个组合、${d.moduleCount ?? 0} 个脚本模块`,
     )
-  if (Array.isArray(d.changedFields))
-    field(
-      '修改项',
-      d.changedFields.map((key: string) => fieldLabels[key] ?? key).join('、'),
-      400,
-    )
-  if (Array.isArray(d.notificationChanges)) {
-    const labels: Record<string, string> = {
-      off: '关闭',
-      errors: '仅异常',
-      all: '全部',
-    }
-    for (const item of d.notificationChanges as Record<string, unknown>[])
-      field(
-        '通知范围',
-        `${item.label}：${labels[String(item.before)] ?? item.before} → ${labels[String(item.after)] ?? item.after}`,
-      )
-  }
-  if (d.nodeCount != null) field('节点数量', d.nodeCount)
-  if (d.replaced != null) field('导入数量', d.replaced)
-  if (d.count != null) field('分享次数上限', d.count)
-  if (d.endAt) field('分享到期时间', new Date(Number(d.endAt)).toISOString())
-  if (failed(entry) && d.path) {
-    field('请求', [d.method, d.path].filter(Boolean).join(' '), 200)
-  }
-  if (d.httpStatus) field('接口状态', `HTTP ${d.httpStatus}`)
-  if (d.status) field('上游状态', `HTTP ${d.status}`)
-  if (d.durationMs != null) field('耗时', formatDuration(Number(d.durationMs)))
-  field('错误代码', d.code, 100)
-  if (d.operatorName || d.operatorIndex != null)
-    field(
-      '出错操作',
-      [
-        d.operatorIndex != null ? `第 ${Number(d.operatorIndex) + 1} 项` : '',
-        d.operatorName,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-    )
-  const position = (item: Record<string, unknown>) =>
-    [
-      item.field
-        ? `字段：${fieldLabels[String(item.field)] ?? item.field}`
-        : '',
-      item.operatorIndex != null
-        ? `操作第 ${Number(item.operatorIndex) + 1} 项`
-        : '',
-      item.configLine != null ? `配置第 ${item.configLine} 行` : '',
-      item.sourceLine != null ? `来源第 ${item.sourceLine} 行` : '',
-      item.scriptLine != null
-        ? `脚本第 ${item.scriptLine} 行${item.scriptColumn != null ? `第 ${item.scriptColumn} 列` : ''}`
-        : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
-  field('定位', position(d), 250)
   if (failed(entry) || entry.level === 'warn')
     field('原因', d.reason || d.message || entry.message, 500)
   const problems = [
     ...(Array.isArray(d.failures) ? d.failures : []),
     ...(Array.isArray(d.issues) ? d.issues : []),
     ...(Array.isArray(d.processingDetails) ? d.processingDetails : []),
-  ] as Record<string, unknown>[]
-  if (problems.length) {
-    rows.push('', `<b>异常详情（${problems.length} 项）</b>`)
-    for (const [index, item] of problems.slice(0, 6).entries()) {
-      const source =
-        item.resourceDisplayName ||
-        item.subscription ||
-        item.source ||
-        item.resourceName ||
-        item.operatorName ||
-        '当前资源'
-      rows.push(`${index + 1}. ${escapeTelegram(source, 120)}`)
-      const location = position(item)
-      if (location) rows.push(escapeTelegram(location, 200))
-      rows.push(
-        escapeTelegram(
-          item.reason || item.message || item.code || '详情见日志',
-          400,
-        ),
-      )
-      if (item.status) rows.push(`上游 HTTP ${escapeTelegram(item.status, 8)}`)
-    }
-    if (problems.length > 6) rows.push(`其余 ${problems.length - 6} 项见日志`)
-  }
+  ]
+  if (problems.length) field('异常数量', problems.length)
+  if (entry.level === 'warn' && Number(d.httpStatus) < 400)
+    field('结果', '本次请求已完成，存在处理异常，详情请查看日志')
   field('请求编号', d.auditRequestId, 100)
   // 按完整行控制消息预算，不截断 HTML 实体或标签。
   const result: string[] = []
@@ -460,41 +350,31 @@ export async function notifyServerEvents(
   env: Env,
   entries: readonly ServerLog[],
   resource?: Subscription | Collection,
+  request?: NotificationRequest,
 ): Promise<void> {
   if (!env.SUKI_SUB_PUSH_SERVICE || !entries.length) return
-  let globalSettings: Settings = {}
+  let globalSettings: Settings
   try {
     globalSettings = await getAllSettings(env.SUKI_SUB_DB)
   } catch {
-    // 设置表读取失败时退回资源级开关发送,通知不依赖设置表可用。
+    // 无法确认关闭状态时保持静默，绝不退回资源级配置发送。
+    return
   }
-  // 全局总开关:显式关闭时全部静默(未设置视为开启,保持既有行为)。
-  const master = telegramMasterMode(globalSettings)
-  if (master === 'off') return
-  // 操作类请求按各自通知范围；总范围为仅异常时再过滤成功事件。
-  // 其余带资源上下文的请求(订阅拉取/预览)按资源级开关;都不匹配时仅接口异常兜底。
-  let opCategory: string | undefined
-  for (const entry of entries) {
-    const action = String(entry.details?.action ?? '')
-    opCategory = telegramOperationCategory(action)
-    if (opCategory) break
-  }
-  const mode = opCategory
-    ? telegramCategoryMode(globalSettings, opCategory)
-    : resource
-      ? resource.telegramEnabled === true
-        ? resource.telegramNotifySuccess === true
-          ? 'all'
-          : 'errors'
-        : 'off'
-      : telegramCategoryMode(globalSettings, 'telegramNotifySystemErrors')
-  const switches: TelegramSwitches = {
-    telegramEnabled: mode !== 'off',
-    telegramNotifySuccess: mode === 'all' && master === 'all',
-  }
-  if (switches.telegramEnabled !== true) return
+  const notification = selectTelegramNotification(
+    globalSettings,
+    entries,
+    resource,
+    request,
+  )
+  if (!notification) return
   try {
-    await sendTelegramEvents(env, entries, switches)
+    if (!parseTelegramConfig(env.SUKI_SUB_PUSH_SERVICE)) return
+    if (!(await claimNotification(env.SUKI_SUB_DB, notification.cooldownKey)))
+      return
+    await sendTelegramEvents(env, [notification.entry], {
+      telegramEnabled: true,
+      telegramNotifySuccess: true,
+    })
   } catch (error) {
     writeServerEvent('warn', 'Telegram 通知发送失败', {
       action: 'notification.telegram',

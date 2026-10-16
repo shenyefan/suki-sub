@@ -1,3 +1,5 @@
+import type { ResourceNotificationMode } from './telegram-notifications'
+
 /**
  * 前后端共享的资源类型:已知字段显式声明,演进字段走索引签名。
  */
@@ -20,6 +22,8 @@ export interface Subscription {
   /** 管线操作符列表 */
   process?: Operator[]
   ignoreIncompatibleOperations?: boolean
+  /** 客户端拉取通知，缺省跟随全局；旧布尔字段仅用于读取历史配置。 */
+  telegramNotificationMode?: ResourceNotificationMode
   telegramEnabled?: boolean
   telegramNotifySuccess?: boolean
   /** 本地订阅内容 */
@@ -64,6 +68,8 @@ export interface Collection {
   subscriptions: string[]
   process?: Operator[]
   ignoreIncompatibleOperations?: boolean
+  /** 客户端拉取通知，缺省跟随全局；旧布尔字段仅用于读取历史配置。 */
+  telegramNotificationMode?: ResourceNotificationMode
   telegramEnabled?: boolean
   telegramNotifySuccess?: boolean
   displayName?: string

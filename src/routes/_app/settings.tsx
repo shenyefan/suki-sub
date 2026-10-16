@@ -12,6 +12,7 @@ import { api } from '#/lib/api'
 import type { Settings } from '#/shared/types'
 import { cacheSettings } from '#/lib/query-cache'
 import { qk, useSettings } from '#/lib/queries'
+import { SwitchField } from '#/components/shared/switch-field'
 import { PageHeader } from '#/components/shared/page-header'
 import { ConfirmDialog } from '#/components/shared/confirm-dialog'
 import {
@@ -148,7 +149,7 @@ function SettingsPage() {
 
   const [exporting, setExporting] = useState(false)
 
-  // 通知:全局总开关(未设置视为开启)与各类操作通知,取值立即保存。
+  // 通知选项独立保存，总开关关闭时保留分类偏好。
   const telegramConfigHint =
     settings.data?.['telegramConfiguration'] === 'invalid'
       ? '推送服务配置无效,请检查环境变量 SUKI_SUB_PUSH_SERVICE 的格式'
@@ -308,41 +309,52 @@ function SettingsPage() {
           </div>
         </Section>
 
-        <Section title="通知">
+        <Section
+          title="Telegram 通知"
+          description="日常编辑、预览和流量查询只在页面提示。相同资源的同类结果每 30 分钟最多推送一次。"
+        >
           <div className="grid gap-2">
             {telegramConfigHint && (
               <p className="text-sm text-muted-foreground">
                 {telegramConfigHint}
               </p>
             )}
+            <div className="border-b pb-3">
+              <SwitchField
+                label="Telegram 通知总开关"
+                checked={telegramMaster !== 'off'}
+                disabled={savingSettings}
+                onCheckedChange={(checked) =>
+                  saveSettings.mutate(
+                    telegramModePatch(
+                      'telegramEnabled',
+                      checked ? 'all' : 'off',
+                    ),
+                  )
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                关闭后全部停止推送，包括订阅和组合单独开启的通知。
+              </p>
+            </div>
+            {typeof settings.data?.telegramLastFailure === 'string' && (
+              <p className="text-xs text-destructive">
+                最近一次推送失败：{settings.data.telegramLastFailure}
+              </p>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                {
-                  key: 'telegramNotificationMode',
-                  label: '通知总范围',
-                  description: '关闭后全部静默；仅异常会过滤所有成功通知',
-                },
-                ...TELEGRAM_NOTIFICATIONS,
-              ].map((item) => (
+              {TELEGRAM_NOTIFICATIONS.map((item) => (
                 <div
                   key={item.key}
                   className="grid min-w-0 content-start gap-1.5"
                 >
                   <Label htmlFor={item.key}>{item.label}</Label>
                   <Select
-                    value={
-                      item.key === 'telegramNotificationMode'
-                        ? telegramMaster
-                        : telegramCategoryMode(settings.data ?? {}, item.key)
-                    }
+                    value={telegramCategoryMode(settings.data ?? {}, item.key)}
                     disabled={savingSettings}
                     onValueChange={(value) =>
                       saveSettings.mutate(
-                        telegramModePatch(
-                          settings.data ?? {},
-                          item.key,
-                          value as NotificationMode,
-                        ),
+                        telegramModePatch(item.key, value as NotificationMode),
                       )
                     }
                   >
@@ -351,10 +363,17 @@ function SettingsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="off">关闭</SelectItem>
-                      <SelectItem value="errors">仅异常</SelectItem>
-                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="errors">
+                        {item.key === 'telegramNotifySystemErrors'
+                          ? '开启'
+                          : '仅异常'}
+                      </SelectItem>
+                      {item.key !== 'telegramNotifySystemErrors' && (
+                        <SelectItem value="all">全部</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
+
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     {item.description}
                   </p>

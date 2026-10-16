@@ -26,7 +26,7 @@ src/
     ├── core/             # 订阅处理引擎:proxy-utils(parsers/processors/producers)、produceArtifact、utils
     │   └── sandbox/      # 脚本操作符沙箱(Dynamic Workers;lodash/yaml 单文件 ESM 随沙箱分发)
     └── jobs/             # 定时任务(Gist 备份)
-migrations/               # D1 迁移(wrangler d1 migrations)
+migrations/               # 完整 D1 初始化结构(0001_init.sql)
 ```
 
 ## 登录
@@ -78,6 +78,8 @@ wrangler d1 migrations apply suki-sub --remote
 pnpm deploy
 ```
 
+数据库只保留一份完整初始化脚本 `migrations/0001_init.sql`，用于新实例；旧的独立建表脚本已合并。已有实例的分享表保持原状，通知限频表会在首次发送通知时自动创建，无需重新执行初始化或清空数据。
+
 ## Workers 运行时能力
 
 | 运行需求                            | 本项目实现                                                                                                            |
@@ -95,3 +97,5 @@ pnpm deploy
 前端使用 [Tailwind CSS](https://tailwindcss.com/)。
 
 KV 缓存的内容、有效期和更新规则见 [缓存说明](docs/kv-cache.md)。
+
+Telegram 通知的分类、开关优先级和限频规则见 [通知说明](docs/notifications.md)。

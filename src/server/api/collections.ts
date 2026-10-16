@@ -128,7 +128,7 @@ app.patch('/api/collections/:name', async (c) =>
         )
       setResourceContext(c, 'collection', merged)
       c.set('operationUnchanged' as never, isEqual(old, merged) as never)
-      await validateForSave('collection', merged)
+      await validateForSave('collection', merged, old)
       try {
         await updateCollectionRow(c.env.SUKI_SUB_DB, name, merged, merged.name)
       } catch (err) {

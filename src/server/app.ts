@@ -48,7 +48,11 @@ app.use('*', (c, next) => {
       const task = withServerLogs(
         c.env.SUKI_SUB_DB,
         () =>
-          notifyServerEvents(c.env, entries, getResourceContext(c)?.resource),
+          notifyServerEvents(c.env, entries, getResourceContext(c)?.resource, {
+            path: c.req.path,
+            method: c.req.method,
+            status: c.res.status,
+          }),
         () => metadata,
       )
       try {

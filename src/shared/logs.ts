@@ -105,6 +105,7 @@ export const LOG_ACTION_LABELS: Record<string, string> = {
   'processing.failure': '处理异常',
   'processing.warning': '处理提醒',
   'notification.telegram': '通知异常',
+  'share.access': '访问分享',
   'share.create': '创建分享',
   'share.delete': '删除分享',
 }

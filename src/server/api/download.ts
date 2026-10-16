@@ -60,6 +60,21 @@ function downloadHandler(
   return (c: Context<{ Bindings: Env }>) =>
     withApiStore(c.env, async () => {
       try {
+        const sub =
+          kind === 'subscription'
+            ? await getSubscription(c.env.SUKI_SUB_DB, name)
+            : null
+        const collection =
+          kind === 'collection'
+            ? await getCollection(c.env.SUKI_SUB_DB, name)
+            : null
+        const resource = sub || collection
+        if (resource)
+          setResourceContext(
+            c,
+            kind === 'subscription' ? 'sub' : 'collection',
+            resource,
+          )
         const options = downloadOptions(
           c.req.query(),
           c.req.param('target'),
@@ -76,21 +91,6 @@ function downloadHandler(
           headers: Object.fromEntries(c.req.raw.headers.entries()),
         })
         const opt = { ...options, type: kind, name, $options }
-        const sub =
-          kind === 'subscription'
-            ? await getSubscription(c.env.SUKI_SUB_DB, name)
-            : null
-        const collection =
-          kind === 'collection'
-            ? await getCollection(c.env.SUKI_SUB_DB, name)
-            : null
-        const resource = sub || collection
-        if (resource)
-          setResourceContext(
-            c,
-            kind === 'subscription' ? 'sub' : 'collection',
-            resource,
-          )
         c.set(
           'operationDetails' as never,
           {
@@ -192,6 +192,7 @@ async function shareHandler(c: Context<{ Bindings: Env }>) {
       name: share.name,
     }))
   ) {
+    c.set('operationDetails' as never, { action: 'share.access' } as never)
     return failureResponse(c, 'INVALID_SHARE', '分享链接无效或已过期', 401)
   }
   return downloadHandler(

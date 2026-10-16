@@ -1,75 +1,51 @@
 import type { Settings } from './types'
 
 export type NotificationMode = 'off' | 'errors' | 'all'
+export type ResourceNotificationMode = NotificationMode | 'inherit'
 
-/** 设置页与通知分发共用分类；旧布尔值开启对应“全部”。 */
+/** 设置页与服务端共用事件分类，日常操作只在页面提示。 */
 export const TELEGRAM_NOTIFICATIONS = [
   {
+    key: 'telegramNotifyDownload',
+    defaultMode: 'errors',
+    label: '订阅拉取',
+    description: '客户端拉取订阅或组合的结果，异常包含备用来源回退和部分失败',
+    actions: ['subscription.download'],
+  },
+  {
     key: 'telegramNotifyShareOps',
-    defaultMode: 'all',
-    label: '分享操作',
-    description: '创建、删除分享',
-    prefix: 'share.',
-  },
-  {
-    key: 'telegramNotifyResourceOps',
-    defaultMode: 'errors',
-    label: '订阅与脚本变更',
-    description: '订阅、组合与脚本模块的增删改、导入和克隆',
-    prefixes: ['sub.', 'collection.', 'module.'],
-  },
-  {
-    key: 'telegramNotifySettingsOps',
-    defaultMode: 'errors',
-    label: '设置变更',
-    description: '保存设置与调整通知范围',
-    prefix: 'settings.',
-  },
-  {
-    key: 'telegramNotifyBackupExport',
-    defaultMode: 'errors',
-    label: '导出备份',
-    description: '下载全量备份文件',
-    action: 'backup.export',
-    legacy: 'telegramNotifySettingsOps',
+    defaultMode: 'off',
+    label: '分享管理',
+    description: '创建、删除分享，以及链接无效、过期或次数用尽的访问异常',
+    actions: ['share.create', 'share.delete', 'share.access'],
   },
   {
     key: 'telegramNotifyBackupRestore',
-    defaultMode: 'all',
-    label: '恢复备份',
-    description: '从备份恢复数据',
-    action: 'backup.restore',
-    legacy: 'telegramNotifySettingsOps',
-  },
-  {
-    key: 'telegramNotifyBackupManual',
-    defaultMode: 'errors',
-    label: '手动备份',
-    description: '保存并备份到 GitHub Gist 或 GitLab Snippet',
-    action: 'backup.manual',
-    legacy: 'telegramNotifySettingsOps',
+    defaultMode: 'off',
+    label: '备份恢复',
+    description: '从备份恢复数据的结果',
+    actions: ['backup.restore'],
   },
   {
     key: 'telegramNotifyBackupScheduled',
     defaultMode: 'errors',
     label: '定时备份',
-    description: '定时任务上传备份',
-    action: 'backup.scheduled',
-    legacy: 'telegramNotifySettingsOps',
+    description: '后台定时备份的结果，默认只提醒失败',
+    actions: ['backup.scheduled'],
   },
   {
     key: 'telegramNotifySessionOps',
-    defaultMode: 'errors',
+    defaultMode: 'off',
     label: '登录与退出',
-    description: '登录回调与退出登录',
-    prefix: 'session.',
-    legacy: 'telegramNotifySettingsOps',
+    description: '登录回调与退出登录的结果',
+    actions: ['session.login', 'session.logout'],
   },
   {
     key: 'telegramNotifySystemErrors',
-    defaultMode: 'all',
-    label: '接口异常',
-    description: '没有资源上下文的接口错误与警告；普通读取不发送成功通知',
+    defaultMode: 'errors',
+    label: '系统故障',
+    description: '其他未归类的服务端故障，不包含预览、流量查询或日常操作失败',
+    actions: [],
   },
 ] as const
 
@@ -78,12 +54,14 @@ export function notificationMode(value: unknown): NotificationMode {
   return value === 'errors' ? 'errors' : 'off'
 }
 
-export function telegramMasterMode(settings: Settings): NotificationMode {
-  return settings.telegramNotificationMode != null
-    ? notificationMode(settings.telegramNotificationMode)
-    : settings.telegramEnabled === false
+/** 未配置时保持关闭；旧总范围迁移为开关，不再限制各分类。 */
+export function telegramMasterMode(settings: Settings): 'off' | 'all' {
+  if (settings.telegramEnabled === false) return 'off'
+  if (settings.telegramNotificationMode != null)
+    return notificationMode(settings.telegramNotificationMode) === 'off'
       ? 'off'
       : 'all'
+  return settings.telegramEnabled === true ? 'all' : 'off'
 }
 
 export function telegramCategoryMode(
@@ -91,42 +69,39 @@ export function telegramCategoryMode(
   key: string,
 ): NotificationMode {
   const category = TELEGRAM_NOTIFICATIONS.find((item) => item.key === key)
-  return notificationMode(
-    settings[key] ??
-      (category && 'legacy' in category
-        ? settings[category.legacy]
-        : undefined) ??
-      category?.defaultMode,
-  )
+  const mode = notificationMode(settings[key] ?? category?.defaultMode)
+  return key === 'telegramNotifySystemErrors' && mode !== 'off'
+    ? 'errors'
+    : mode
 }
 
 export function telegramOperationCategory(action: string): string | undefined {
-  return TELEGRAM_NOTIFICATIONS.find(
-    (item) =>
-      ('action' in item && item.action === action) ||
-      ('prefix' in item && action.startsWith(item.prefix)) ||
-      ('prefixes' in item &&
-        item.prefixes.some((prefix) => action.startsWith(prefix))),
+  return TELEGRAM_NOTIFICATIONS.find((item) =>
+    (item.actions as readonly string[]).includes(action),
   )?.key
 }
 
-/** 首次修改时固定旧设置的各分类值，避免一个旧开关联动多个新分类。 */
+/** 显式旧开关继续有效；没有资源级配置时跟随全局。 */
+export function resourceNotificationMode(value: {
+  telegramNotificationMode?: ResourceNotificationMode
+  telegramEnabled?: boolean
+  telegramNotifySuccess?: boolean
+}): ResourceNotificationMode {
+  if (value.telegramNotificationMode != null)
+    return value.telegramNotificationMode === 'inherit'
+      ? 'inherit'
+      : notificationMode(value.telegramNotificationMode)
+  if (value.telegramEnabled === false) return 'off'
+  if (value.telegramEnabled === true)
+    return value.telegramNotifySuccess === true ? 'all' : 'errors'
+  return 'inherit'
+}
+
 export function telegramModePatch(
-  settings: Settings,
   key: string,
   mode: NotificationMode,
 ): Settings {
-  return {
-    ...Object.fromEntries(
-      TELEGRAM_NOTIFICATIONS.map((item) => [
-        item.key,
-        telegramCategoryMode(settings, item.key),
-      ]),
-    ),
-    telegramNotificationMode: telegramMasterMode(settings),
-    [key]: mode,
-    ...(key === 'telegramNotificationMode'
-      ? { telegramEnabled: mode !== 'off' }
-      : {}),
-  }
+  return key === 'telegramEnabled'
+    ? { telegramEnabled: mode !== 'off', telegramNotificationMode: mode }
+    : { [key]: mode }
 }
