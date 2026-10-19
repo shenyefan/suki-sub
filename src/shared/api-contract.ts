@@ -7,6 +7,8 @@
  * - 成功:直接返回数据 + 恰当 HTTP 状态码;失败:{code,message,...context}
  */
 
+import type { LogEntry, LogFilters } from './logs'
+
 import type {
   Collection,
   ModuleItem,
@@ -14,6 +16,15 @@ import type {
   Subscription,
   TokenItem,
 } from './types'
+
+export interface LogsQuery extends LogFilters {
+  cursor?: string
+}
+
+export interface LogsResponse {
+  logs: LogEntry[]
+  nextCursor: string | null
+}
 
 export interface ApiErrorShape {
   code: string

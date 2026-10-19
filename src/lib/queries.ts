@@ -1,11 +1,16 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { LogEntry } from '#/shared/logs'
+import type { LogFilters } from '#/shared/logs'
 /**
  * 常用服务端状态 hooks(react-query 封装,页面直接消费)。
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { ApiRoutes } from '#/shared/api-contract'
-import type { FlowInfoResponse } from '#/shared/api-contract'
+import type { FlowInfoResponse, LogsResponse } from '#/shared/api-contract'
 import { api } from '#/lib/api'
 import type {
   Collection,
@@ -70,12 +75,19 @@ export function useEnv() {
 
 export type { LogEntry } from '#/shared/logs'
 
-export function useLogs() {
-  return useQuery({
-    queryKey: qk.logs,
-    refetchInterval: 5000,
-    queryFn: async ({ signal }) =>
-      (await api.get<{ logs: LogEntry[] }>(ApiRoutes.logs, signal)).logs,
+export function useLogs(filters: LogFilters) {
+  return useInfiniteQuery({
+    queryKey: [...qk.logs, filters],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ signal, pageParam }) => {
+      const params = new URLSearchParams({ ...filters })
+      if (pageParam) params.set('cursor', pageParam)
+      return api.get<LogsResponse>(`${ApiRoutes.logs}?${params}`, signal)
+    },
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    // 仅首屏自动刷新，翻阅历史时避免反复重查所有已加载页面。
+    refetchInterval: (query) =>
+      (query.state.data?.pages.length ?? 0) <= 1 ? 5000 : false,
   })
 }
 

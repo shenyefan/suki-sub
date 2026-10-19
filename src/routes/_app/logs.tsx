@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 
 import { ApiRoutes } from '#/shared/api-contract'
 import { api } from '#/lib/api'
-import { filterLogs, logOutcome, LOG_ACTION_LABELS } from '#/shared/logs'
+import { logOutcome, LOG_ACTION_LABELS } from '#/shared/logs'
 import type { LogEntry, LogFilters } from '#/shared/logs'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
@@ -35,7 +35,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '#/components/ui/collapsible'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_app/logs')({
@@ -61,13 +61,47 @@ const EMPTY_FILTERS: LogFilters = {
 const ACTION_LABELS = LOG_ACTION_LABELS
 
 function LogsPage() {
-  const logs = useLogs()
   const client = useQueryClient()
   const [clearOpen, setClearOpen] = useState(false)
   const [draft, setDraft] = useState<LogFilters>(EMPTY_FILTERS)
   const [filters, setFilters] = useState<LogFilters>(EMPTY_FILTERS)
-  const entries = logs.data ?? []
-  const filtered = filterLogs(entries, filters)
+  const logs = useLogs(filters)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
+  const entriesByKey = new Map<string | number, LogEntry>()
+  for (const entry of logs.data?.pages.flatMap((page) => page.logs) ?? []) {
+    const details = entry.details ?? {}
+    const key =
+      details.auditRequestId &&
+      details.action &&
+      logOutcome(entry) === 'success'
+        ? JSON.stringify([
+            details.auditRequestId,
+            details.action,
+            details.targetResourceName ?? details.resourceName,
+          ])
+        : entry.id
+    const previous = entriesByKey.get(key)
+    entriesByKey.set(
+      key,
+      previous
+        ? { ...previous, details: { ...details, ...previous.details } }
+        : entry,
+    )
+  }
+  const entries = [...entriesByKey.values()]
+  const { hasNextPage, isFetching, isFetchNextPageError, fetchNextPage } = logs
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !hasNextPage || isFetching || isFetchNextPageError) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) void fetchNextPage({ cancelRefetch: false })
+      },
+      { rootMargin: '200px' },
+    )
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [hasNextPage, isFetching, isFetchNextPageError, fetchNextPage])
   const actions = Array.from(
     new Set([
       ...Object.keys(ACTION_LABELS),
@@ -83,10 +117,9 @@ function LogsPage() {
     mutationFn: () => api.del(ApiRoutes.logs),
     onSuccess: async () => {
       await client.cancelQueries({ queryKey: qk.logs })
-      client.setQueryData(qk.logs, [])
       toast.success('已清空')
       setClearOpen(false)
-      void client.invalidateQueries({ queryKey: qk.logs })
+      await client.resetQueries({ queryKey: qk.logs })
     },
     onError: (err) => toast.error(`清空失败:${err.message}`),
   })
@@ -103,9 +136,7 @@ function LogsPage() {
               variant="outline"
               size="sm"
               loading={logs.isFetching}
-              onClick={() =>
-                void client.invalidateQueries({ queryKey: qk.logs })
-              }
+              onClick={() => void client.resetQueries({ queryKey: qk.logs })}
             >
               <RefreshCw aria-hidden />
               刷新
@@ -212,7 +243,7 @@ function LogsPage() {
             <Skeleton key={i} className="h-8 w-full" />
           ))}
         </div>
-      ) : logs.isError ? (
+      ) : logs.isError && !entries.length ? (
         <div
           role="alert"
           className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
@@ -220,23 +251,61 @@ function LogsPage() {
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
           日志加载失败：{logs.error.message}
         </div>
-      ) : !logs.data?.length ? (
-        <EmptyState icon={ScrollText} title="暂无日志" />
-      ) : !filtered.length ? (
+      ) : !entries.length ? (
         <EmptyState
           icon={ScrollText}
-          title="没有符合筛选条件的日志"
-          description="调整条件或点击重置查看全部日志。"
+          title={
+            filters.action === 'all' &&
+            !filters.userId &&
+            !filters.requestId &&
+            filters.outcome === 'all'
+              ? '暂无日志'
+              : '没有符合筛选条件的日志'
+          }
         />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-card">
           <div className="divide-y">
-            {filtered.map((entry) => (
+            {entries.map((entry) => (
               <LogRow key={entry.id} entry={entry} />
             ))}
           </div>
         </div>
       )}
+
+      <div
+        ref={loadMoreRef}
+        className="flex justify-center py-4"
+        aria-live="polite"
+      >
+        {logs.isFetchNextPageError ? (
+          <div
+            role="alert"
+            className="flex items-center gap-3 text-sm text-destructive"
+          >
+            加载更多失败：{logs.error.message}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void logs.fetchNextPage()}
+            >
+              重试
+            </Button>
+          </div>
+        ) : logs.isFetchingNextPage ? (
+          <span className="text-sm text-muted-foreground">正在加载更多…</span>
+        ) : logs.hasNextPage ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void logs.fetchNextPage()}
+          >
+            加载更多
+          </Button>
+        ) : entries.length > 0 ? (
+          <span className="text-sm text-muted-foreground">已加载全部日志</span>
+        ) : null}
+      </div>
 
       <ConfirmDialog
         open={clearOpen}

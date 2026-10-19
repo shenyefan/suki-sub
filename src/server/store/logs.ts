@@ -1,8 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { redactDiagnostic } from '../core/utils/diagnostics'
 
-import { normalizeLog, logOutcome } from '#/shared/logs'
+import { normalizeLog, logOutcome, filterLogs } from '#/shared/logs'
 import type { LogEntry } from '#/shared/logs'
+import type { LogsQuery, LogsResponse } from '#/shared/api-contract'
 
 export type ServerLog = Omit<LogEntry, 'id'>
 
@@ -226,51 +227,72 @@ export async function withServerLogs<T>(
   })
 }
 
-export async function listServerLogs(db: D1Database): Promise<LogEntry[]> {
+/** 按时间和 ID 翻页，新增记录不会导致后续页面整体偏移。 */
+export async function listServerLogs(
+  db: D1Database,
+  query: LogsQuery,
+): Promise<LogsResponse> {
   await ensureLogSchema(db)
-  const result = await db
-    .prepare(
-      "SELECT id, time, level, message, details FROM runtime_logs WHERE level IN ('warn', 'error') OR details IS NOT NULL ORDER BY time DESC, id DESC LIMIT ?",
-    )
-    .bind(RETAIN)
-    .all<Omit<LogEntry, 'details'> & { details: string | null }>()
-  const entries = result.results
-    .map(({ details, ...entry }) => ({
-      ...entry,
-      message: redactDiagnostic(entry.message),
-      ...(details
-        ? {
-            details: sanitizeLogValue(JSON.parse(details)) as Record<
+  const pageSize = 50
+  const batchSize = 100
+  let cursor: { time: string; id: number } | undefined = query.cursor
+    ? JSON.parse(query.cursor)
+    : undefined
+  const entries: LogEntry[] = []
+  const seen = new Map<string, LogEntry>()
+  let nextCursor: string | null = null
+
+  // 旧记录仍需归一化；按小批次扫描，凑够一页后立即停止。
+  for (;;) {
+    const result = await db
+      .prepare(
+        `SELECT id, time, level, message, details FROM runtime_logs
+         WHERE (level IN ('warn', 'error') OR details IS NOT NULL)
+         ${cursor ? 'AND (time < ? OR (time = ? AND id < ?))' : ''}
+         ORDER BY time DESC, id DESC LIMIT ?`,
+      )
+      .bind(...(cursor ? [cursor.time, cursor.time, cursor.id] : []), batchSize)
+      .all<Omit<LogEntry, 'details'> & { details: string | null }>()
+    for (const row of result.results) {
+      cursor = { time: row.time, id: row.id }
+      const entry = normalizeLog({
+        ...row,
+        message: redactDiagnostic(row.message),
+        details: row.details
+          ? (sanitizeLogValue(JSON.parse(row.details)) as Record<
               string,
               unknown
-            >,
-          }
-        : {}),
-    }))
-    .map(normalizeLog)
-    .filter((entry): entry is LogEntry => entry != null)
-  const seen = new Map<string, LogEntry>()
-  return entries.filter((entry) => {
-    const details = entry.details ?? {}
-    if (
-      !details.auditRequestId ||
-      !details.action ||
-      logOutcome(entry) !== 'success'
-    )
-      return true
-    const key = JSON.stringify([
-      details.auditRequestId,
-      details.action,
-      details.targetResourceName ?? details.resourceName,
-    ])
-    const previous = seen.get(key)
-    if (previous) {
-      previous.details = { ...details, ...previous.details }
-      return false
+            >)
+          : undefined,
+      })
+      if (!entry) continue
+      const details = entry.details ?? {}
+      if (
+        details.auditRequestId &&
+        details.action &&
+        logOutcome(entry) === 'success'
+      ) {
+        const key = JSON.stringify([
+          details.auditRequestId,
+          details.action,
+          details.targetResourceName ?? details.resourceName,
+        ])
+        const previous = seen.get(key)
+        if (previous) {
+          previous.details = { ...details, ...previous.details }
+          continue
+        }
+        seen.set(key, entry)
+      }
+      if (!filterLogs([entry], query).length) continue
+      // 多找一条匹配记录，避免有下一页却显示为空。
+      if (entries.length === pageSize) return { logs: entries, nextCursor }
+      entries.push(entry)
+      nextCursor = JSON.stringify(cursor)
     }
-    seen.set(key, entry)
-    return true
-  })
+    if (result.results.length < batchSize)
+      return { logs: entries, nextCursor: null }
+  }
 }
 
 /** 设置页只读取最近一次推送失败摘要，不把运行状态混进持久设置。 */
