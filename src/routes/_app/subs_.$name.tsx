@@ -30,7 +30,7 @@ import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { SwitchField } from '#/components/shared/switch-field'
-import { Skeleton } from '#/components/ui/skeleton'
+import { EditorSkeleton } from '#/components/subs/editor-skeleton'
 import { EditorLayout } from '#/components/shared/editor-layout'
 import {
   Select,
@@ -203,12 +203,7 @@ function SubEditorPage() {
   }
 
   if (!isNew && isLoading) {
-    return (
-      <div className="page-container grid gap-3">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    )
+    return <EditorSkeleton kind="sub" />
   }
 
   const isLocal = form.source === 'local'

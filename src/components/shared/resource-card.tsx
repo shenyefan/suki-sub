@@ -13,6 +13,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { cn } from '#/lib/utils'
 import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
+import { Skeleton } from '#/components/ui/skeleton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,6 +94,7 @@ function CardLayout({
   className,
   setNodeRef,
   style,
+  loading = false,
 }: {
   icon?: React.ReactNode
   title: React.ReactNode
@@ -105,11 +107,13 @@ function CardLayout({
   className?: string
   setNodeRef?: (node: HTMLElement | null) => void
   style?: React.CSSProperties
+  loading?: boolean
 }) {
   return (
     <li
       ref={setNodeRef}
       style={style}
+      aria-hidden={loading || undefined}
       className={cn(
         'group relative flex flex-col rounded-lg border bg-card p-3',
         className,
@@ -148,6 +152,13 @@ function CardLayout({
         role="group"
         aria-label="操作"
       >
+        {loading && (
+          <>
+            <Skeleton className="size-8" />
+            <Skeleton className="size-8" />
+            <Skeleton className="ml-auto size-8" />
+          </>
+        )}
         {actions.map((action) => (
           <Button
             key={action.key}
@@ -193,6 +204,27 @@ function CardLayout({
         )}
       </div>
     </li>
+  )
+}
+
+/** 与实际卡片共用行高、留白与边框，避免加载完成时发生跳动。 */
+export function ResourceCardSkeleton({
+  sortable = false,
+}: {
+  sortable?: boolean
+}) {
+  return (
+    <CardLayout
+      loading
+      icon={<Skeleton className="size-10 shrink-0" />}
+      title={<Skeleton className="h-4 w-28 max-w-full" />}
+      subtitle={<Skeleton className="h-3 w-16" />}
+      content1={<Skeleton className="h-3 w-40 max-w-full" />}
+      content2={<Skeleton className="h-3 w-24" />}
+      actions={[]}
+      moreActions={[]}
+      dragHandle={sortable ? <Skeleton className="size-7 shrink-0" /> : null}
+    />
   )
 }
 

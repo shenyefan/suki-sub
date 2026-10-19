@@ -20,12 +20,15 @@ import { formatDateTime } from '#/lib/format'
 import { PageHeader } from '#/components/shared/page-header'
 import { EmptyState } from '#/components/shared/empty-state'
 import { ConfirmDialog } from '#/components/shared/confirm-dialog'
-import { Card, CardIcon } from '#/components/shared/resource-card'
+import {
+  Card,
+  CardIcon,
+  ResourceCardSkeleton,
+} from '#/components/shared/resource-card'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Badge } from '#/components/ui/badge'
-import { Skeleton } from '#/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
@@ -266,11 +269,16 @@ function TokensPage() {
       />
 
       {tokens.isLoading ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full" />
+        <ul
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          role="status"
+          aria-label="正在加载分享"
+          aria-busy="true"
+        >
+          {Array.from({ length: 3 }, (_, i) => (
+            <ResourceCardSkeleton key={i} />
           ))}
-        </div>
+        </ul>
       ) : !tokens.data?.length ? (
         <EmptyState
           icon={Share2}

@@ -28,7 +28,7 @@ import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Badge } from '#/components/ui/badge'
-import { Skeleton } from '#/components/ui/skeleton'
+import { EditorSkeleton } from '#/components/subs/editor-skeleton'
 import { CollectionFlowFields } from '#/components/subs/collection-flow-fields'
 import { IconField } from '#/components/shared/icon-fields'
 import { EditorLayout } from '#/components/shared/editor-layout'
@@ -144,12 +144,7 @@ function CollectionEditorPage() {
   const subNames = (subs.data ?? []).map((s: Subscription) => s.name)
 
   if (!isNew && isLoading) {
-    return (
-      <div className="page-container grid gap-3">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    )
+    return <EditorSkeleton kind="collection" />
   }
 
   const process = (form.process ?? []) as ProcessItem[]

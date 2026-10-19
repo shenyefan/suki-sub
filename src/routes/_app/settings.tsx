@@ -27,6 +27,7 @@ import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Label } from '#/components/ui/label'
 import { Skeleton } from '#/components/ui/skeleton'
+import { FieldSkeleton } from '#/components/shared/field-skeleton'
 import {
   Select,
   SelectContent,
@@ -187,10 +188,85 @@ function SettingsPage() {
 
   if (settings.isLoading) {
     return (
-      <div className="page-container grid gap-3">
-        <Skeleton className="h-10 w-40" />
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-40 w-full" />
+      <div
+        className="page-container"
+        role="status"
+        aria-label="正在加载设置"
+        aria-busy="true"
+      >
+        <PageHeader eyebrow="SETTINGS" title="设置" />
+        <div className="grid gap-4">
+          <Section
+            title="Gist 同步"
+            description="同步备份到 GitHub Gist 或 GitLab Snippet。"
+            actions={
+              <Button size="sm" variant="outline" disabled>
+                <CloudUpload aria-hidden />
+                保存并备份
+              </Button>
+            }
+          >
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <FieldSkeleton label="访问 Token" className="sm:col-span-2" />
+              <FieldSkeleton label="同步平台" />
+              <FieldSkeleton label="备份 Gist 名称" />
+            </div>
+          </Section>
+          <Section title="通用">
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <FieldSkeleton label="新建条目位置" />
+              <FieldSkeleton label="界面主题" />
+            </div>
+          </Section>
+          <Section
+            title="Telegram 通知"
+            description="日常编辑、预览和流量查询只在页面提示。相同资源的同类结果每 30 分钟最多推送一次。"
+          >
+            <div className="grid gap-2">
+              <Skeleton className="h-5 w-64 max-w-full" aria-hidden />
+              <div className="border-b pb-3">
+                <div className="flex min-h-11 items-center justify-between gap-4">
+                  <span className="text-sm">Telegram 通知总开关</span>
+                  <Skeleton className="h-5 w-9 rounded-full" aria-hidden />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  关闭后全部停止推送，包括订阅和组合单独开启的通知。
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {TELEGRAM_NOTIFICATIONS.map((item) => (
+                  <div
+                    key={item.key}
+                    className="grid min-w-0 content-start gap-1.5"
+                  >
+                    <span className="text-sm leading-none font-medium">
+                      {item.label}
+                    </span>
+                    <Skeleton className="h-9 w-full" aria-hidden />
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {item.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+          <Section
+            title="备份与恢复"
+            description="全量导出 / 恢复订阅、组合与设置。"
+          >
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" disabled>
+                <Download aria-hidden />
+                导出全部数据
+              </Button>
+              <Button variant="outline" className="text-destructive" disabled>
+                <Upload aria-hidden />
+                从文件恢复
+              </Button>
+            </div>
+          </Section>
+        </div>
       </div>
     )
   }

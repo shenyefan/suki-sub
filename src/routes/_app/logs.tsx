@@ -238,10 +238,33 @@ function LogsPage() {
       </form>
 
       {logs.isLoading ? (
-        <div className="grid gap-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
-          ))}
+        <div
+          className="overflow-hidden rounded-lg border bg-card"
+          role="status"
+          aria-label="正在加载日志"
+          aria-busy="true"
+        >
+          <div className="divide-y" aria-hidden="true">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div
+                key={i}
+                className="grid w-full grid-cols-[minmax(0,1fr)_3rem_1rem] items-center gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_3rem_8.5rem_1rem] md:gap-x-2"
+              >
+                <div className="min-w-0">
+                  <div className="flex h-5 items-center">
+                    <Skeleton className="h-4 w-56 max-w-full" />
+                  </div>
+                  <div className="mt-1 flex h-4 items-center gap-2">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-3 w-28 md:hidden" />
+                  </div>
+                </div>
+                <Skeleton className="h-5 w-full rounded-full" />
+                <Skeleton className="hidden h-3 w-28 md:block" />
+                <Skeleton className="size-4" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : logs.isError && !entries.length ? (
         <div

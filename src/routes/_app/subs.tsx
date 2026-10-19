@@ -40,7 +40,7 @@ import { SortableList } from '#/components/shared/sortable-list'
 import { CollectionCard, SubCard } from '#/components/subs/sub-item-card'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
-import { Skeleton } from '#/components/ui/skeleton'
+import { ResourceCardSkeleton } from '#/components/shared/resource-card'
 
 export const Route = createFileRoute('/_app/subs')({
   component: SubsPage,
@@ -304,9 +304,21 @@ function SubsPage() {
       </div>
 
       {loading ? (
-        <div className={gridClass}>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-36 w-full" />
+        <div
+          className="grid gap-6"
+          role="status"
+          aria-label="正在加载订阅"
+          aria-busy="true"
+        >
+          {['单条订阅', '组合订阅'].map((title) => (
+            <section key={title}>
+              <h2 className="mb-2 px-1 text-sm font-medium">{title}</h2>
+              <ul className={gridClass}>
+                {Array.from({ length: 3 }, (_, i) => (
+                  <ResourceCardSkeleton key={i} sortable />
+                ))}
+              </ul>
+            </section>
           ))}
         </div>
       ) : !hasAny ? (
