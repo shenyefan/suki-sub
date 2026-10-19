@@ -11,6 +11,9 @@ import { getAllSettings, reorderTable, saveSettings } from '../store/d1'
 import { getEngineStore } from '../store/engine-store'
 import { resourceLabel } from '#/lib/resource-display'
 import { RequestInvalidError } from '../core/errors'
+import { MASKED_GIST_TOKEN } from '#/shared/api-contract'
+import type { SettingsResponse } from '#/shared/api-contract'
+import type { Settings } from '#/shared/types'
 import {
   TELEGRAM_NOTIFICATIONS,
   telegramCategoryMode,
@@ -19,11 +22,19 @@ import {
 
 const app = new Hono<{ Bindings: Env }>()
 
+/** 仅在响应中脱敏，持久化和备份任务继续使用真实凭据。 */
+function settingsForClient(settings: Settings): SettingsResponse {
+  return {
+    ...settings,
+    gistToken: settings.gistToken ? MASKED_GIST_TOKEN : '',
+  }
+}
+
 app.get('/api/settings', async (c) =>
   withApiStore(c.env, async () => {
     try {
       return c.json({
-        ...(await getAllSettings(c.env.SUKI_SUB_DB)),
+        ...settingsForClient(await getAllSettings(c.env.SUKI_SUB_DB)),
         telegramConfiguration: telegramConfigurationState(c.env),
         telegramLastFailure: await lastTelegramFailure(c.env.SUKI_SUB_DB).catch(
           () => null,
@@ -39,6 +50,8 @@ app.patch('/api/settings', async (c) =>
   withApiStore(c.env, async () => {
     try {
       const patch = await c.req.json()
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch))
+        throw new RequestInvalidError('INVALID_BODY', '设置必须是对象')
       delete patch.telegramConfiguration
       delete patch.telegramLastFailure
       if (
@@ -67,7 +80,33 @@ app.patch('/api/settings', async (c) =>
           )
       }
       const current = await getAllSettings(c.env.SUKI_SUB_DB)
-      const next = { ...current, ...patch }
+      if (Object.hasOwn(patch, 'gistToken')) {
+        if (typeof patch.gistToken !== 'string')
+          throw new RequestInvalidError(
+            'INVALID_GIST_TOKEN',
+            '访问 Token 必须是字符串',
+            {
+              field: 'gistToken',
+            },
+          )
+        const token = patch.gistToken.trim()
+        if (token === MASKED_GIST_TOKEN) delete patch.gistToken
+        else if (token.includes('*'))
+          throw new RequestInvalidError(
+            'INVALID_GIST_TOKEN',
+            '请输入完整的新 Token，不能包含星号掩码',
+            {
+              field: 'gistToken',
+            },
+          )
+        else patch.gistToken = token
+      }
+      const updates = Object.fromEntries(
+        Object.entries(patch).filter(
+          ([key, value]) => !isEqual(current[key], value),
+        ),
+      )
+      const next = { ...current, ...updates }
       const categories = [
         { key: 'telegramNotificationMode', label: '通知总开关' },
         ...TELEGRAM_NOTIFICATIONS,
@@ -83,13 +122,13 @@ app.patch('/api/settings', async (c) =>
             : telegramCategoryMode(next, item.key)
         return before === after ? [] : [{ label: item.label, before, after }]
       })
-      const changedFields = Object.keys(patch).filter((key) => {
+      const changedFields = Object.keys(updates).filter((key) => {
         if (
           key === 'telegramEnabled' ||
           categories.some((item) => item.key === key)
         )
           return false
-        return !isEqual(current[key], patch[key])
+        return true
       })
       c.set(
         'operationDetails' as never,
@@ -103,9 +142,9 @@ app.patch('/api/settings', async (c) =>
         (changedFields.length === 0 &&
           notificationChanges.length === 0) as never,
       )
-      await saveSettings(c.env.SUKI_SUB_DB, { ...current, ...patch })
+      await saveSettings(c.env.SUKI_SUB_DB, updates)
       return c.json({
-        ...(await getAllSettings(c.env.SUKI_SUB_DB)),
+        ...settingsForClient(await getAllSettings(c.env.SUKI_SUB_DB)),
         telegramConfiguration: telegramConfigurationState(c.env),
         telegramLastFailure: await lastTelegramFailure(c.env.SUKI_SUB_DB).catch(
           () => null,

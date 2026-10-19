@@ -84,7 +84,9 @@ export const ApiRoutes = {
 export type SubsResponse = Subscription[]
 export type CollectionsResponse = Collection[]
 export type ModulesResponse = ModuleItem[]
-export type SettingsResponse = Settings
+/** 固定掩码不暴露凭据长度，原样提交表示保留已保存的 Token。 */
+export const MASKED_GIST_TOKEN = '********'
+export type SettingsResponse = Settings & { gistToken: string }
 export type TokensResponse = TokenItem[]
 
 export interface StorageExport {

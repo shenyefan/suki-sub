@@ -10,14 +10,13 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { ApiRoutes } from '#/shared/api-contract'
-import type { FlowInfoResponse, LogsResponse } from '#/shared/api-contract'
-import { api } from '#/lib/api'
 import type {
-  Collection,
-  Settings,
-  Subscription,
-  TokenItem,
-} from '#/shared/types'
+  FlowInfoResponse,
+  LogsResponse,
+  SettingsResponse,
+} from '#/shared/api-contract'
+import { api } from '#/lib/api'
+import type { Collection, Subscription, TokenItem } from '#/shared/types'
 
 export const qk = {
   subs: ['subs'] as const,
@@ -56,7 +55,8 @@ export function useTokens() {
 export function useSettings() {
   return useQuery({
     queryKey: qk.settings,
-    queryFn: ({ signal }) => api.get<Settings>(ApiRoutes.settings, signal),
+    queryFn: ({ signal }) =>
+      api.get<SettingsResponse>(ApiRoutes.settings, signal),
   })
 }
 

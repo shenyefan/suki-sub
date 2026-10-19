@@ -4,12 +4,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Download, Save, Upload, CloudUpload } from 'lucide-react'
+import { Download, Upload, CloudUpload } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { ApiRoutes } from '#/shared/api-contract'
+import { ApiRoutes, MASKED_GIST_TOKEN } from '#/shared/api-contract'
+import type { SettingsResponse } from '#/shared/api-contract'
 import { api } from '#/lib/api'
-import type { Settings } from '#/shared/types'
 import { cacheSettings } from '#/lib/query-cache'
 import { qk, useSettings } from '#/lib/queries'
 import { SwitchField } from '#/components/shared/switch-field'
@@ -83,7 +83,6 @@ function SettingsPage() {
 
   useEffect(() => {
     if (!settings.data) return
-    setGistToken(String(settings.data['gistToken'] ?? ''))
     setSyncPlatform(String(settings.data['syncPlatform'] ?? 'gist'))
     setGistBackupName(
       String(settings.data['gistBackupName'] ?? 'suki-sub-backup'),
@@ -93,9 +92,13 @@ function SettingsPage() {
     )
   }, [settings.data])
 
+  useEffect(() => {
+    setGistToken(settings.data?.gistToken ?? '')
+  }, [settings.data?.gistToken])
+
   const saveSettings = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      api.patch<Settings>(ApiRoutes.settings, patch),
+      api.patch<SettingsResponse>(ApiRoutes.settings, patch),
     onSuccess: async (saved) => {
       await cacheSettings(client, saved)
       toast.success('设置已保存')
@@ -105,11 +108,16 @@ function SettingsPage() {
 
   const saveAndBackup = useMutation({
     mutationFn: async () => {
-      const saved = await api.patch<Settings>(ApiRoutes.settings, {
-        gistToken,
+      const saved = await api.patch<SettingsResponse>(ApiRoutes.settings, {
+        ...(gistToken === settings.data?.gistToken ||
+        gistToken === MASKED_GIST_TOKEN
+          ? {}
+          : { gistToken }),
         syncPlatform,
         gistBackupName,
       })
+      // 更换 Token 后响应仍是相同掩码，不能依赖查询数据变化来清理明文草稿。
+      setGistToken(saved.gistToken)
       await cacheSettings(client, saved)
       try {
         await api.post(ApiRoutes.backupSync)
@@ -198,21 +206,6 @@ function SettingsPage() {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                onClick={() =>
-                  saveSettings.mutate({
-                    gistToken,
-                    syncPlatform,
-                    gistBackupName,
-                  })
-                }
-                loading={saveSettings.isPending}
-                disabled={saveAndBackup.isPending}
-              >
-                <Save aria-hidden />
-                保存
-              </Button>
-              <Button
-                size="sm"
                 variant="outline"
                 disabled={!gistToken.trim() || saveSettings.isPending}
                 loading={saveAndBackup.isPending}
@@ -232,7 +225,12 @@ function SettingsPage() {
                 type="password"
                 disabled={savingSettings}
                 value={gistToken}
+                autoComplete="new-password"
                 placeholder="ghp_… / glpat-…"
+                onFocus={(event) => {
+                  if (gistToken === MASKED_GIST_TOKEN)
+                    event.currentTarget.select()
+                }}
                 onChange={(e) => setGistToken(e.target.value)}
               />
             </div>
