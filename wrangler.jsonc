@@ -3,6 +3,10 @@
   "name": "sub",
   "workers_dev": false,
   "preview_urls": false,
+  // 分支预览单独配置；D1、KV 和 OIDC 凭据需使用预览环境资源。
+  "previews": {
+    "placement": { "mode": "smart" }
+  },
   "routes": [{ "pattern": "sub.syf.sh", "custom_domain": true }],
   "compatibility_date": "2025-09-02",
   // TanStack Start 服务端要求 node:async_hooks
