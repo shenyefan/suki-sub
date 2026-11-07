@@ -82,7 +82,7 @@ pnpm dev                            # http://localhost:3000(vite 插件提供本
 
 依赖更新 PR 使用 GitHub Actions 校验，合并到生产分支后再由 Cloudflare 部署。若不需要为每个 PR 创建在线预览，可在 Worker 的 **Settings → Build → Branch control** 关闭 **Enable Preview Builds**；生产分支保留构建命令 `pnpm run build`、部署命令 `pnpm exec wrangler deploy`。
 
-若日志显示构建成功，随后 `wrangler preview` 报 `missing a previews block`，原因是分支预览缺少独立配置，并非依赖安装或应用构建失败。本仓库尚未配置预览 D1、KV、脚本沙箱绑定和 OIDC secrets；需要在线预览时，应先按 [Worker Previews 文档](https://developers.cloudflare.com/workers/previews/get-started/) 配置这些资源。`preview_urls: false` 不等同于关闭 Workers Builds 的分支构建。预览命令与生产部署命令应分别配置，不能把依赖 PR 的预览命令改成生产部署。
+若日志显示构建成功，随后 `wrangler preview` 报 `missing a previews block`，原因是分支预览缺少独立配置，并非依赖安装或应用构建失败。本仓库已添加 `previews.placement.mode = "smart"`；预览 D1、KV、脚本沙箱绑定和 OIDC secrets 仍需按 [Worker Previews 文档](https://developers.cloudflare.com/workers/previews/get-started/) 配置。此配置块解决缺少 `previews` 的问题，不代表预览应用的资源已齐备。`preview_urls: false` 不等同于关闭 Workers Builds 的分支构建。预览命令与生产部署命令应分别配置，不能把依赖 PR 的预览命令改成生产部署。
 
 ## 部署
 
