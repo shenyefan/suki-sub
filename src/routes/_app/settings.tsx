@@ -1,7 +1,8 @@
+import { useSettingDraft } from '#/lib/use-setting-draft'
 /**
  * 设置：同步、通用、备份与恢复。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, Upload, CloudUpload } from 'lucide-react'
@@ -76,26 +77,19 @@ function SettingsPage() {
   const [restoreFile, setRestoreFile] = useState<File | null>(null)
 
   // Gist / 通用表单(独立草稿,保存时合并提交)
-  const [gistToken, setGistToken] = useState('')
-  const [syncPlatform, setSyncPlatform] = useState('gist')
-  const [gistBackupName, setGistBackupName] = useState('suki-sub-backup')
-  const [createPosition, setCreatePosition] = useState('bottom')
+  const [gistToken, setGistToken] = useSettingDraft(
+    settings.data?.gistToken ?? '',
+  )
+  const [syncPlatform, setSyncPlatform] = useSettingDraft(
+    String(settings.data?.['syncPlatform'] ?? 'gist'),
+  )
+  const [gistBackupName, setGistBackupName] = useSettingDraft(
+    String(settings.data?.['gistBackupName'] ?? 'suki-sub-backup'),
+  )
+  const [createPosition, setCreatePosition] = useSettingDraft(
+    settings.data?.['createItemPosition'] === 'top' ? 'top' : 'bottom',
+  )
   const [themeMode, setThemeMode] = useThemeMode()
-
-  useEffect(() => {
-    if (!settings.data) return
-    setSyncPlatform(String(settings.data['syncPlatform'] ?? 'gist'))
-    setGistBackupName(
-      String(settings.data['gistBackupName'] ?? 'suki-sub-backup'),
-    )
-    setCreatePosition(
-      settings.data['createItemPosition'] === 'top' ? 'top' : 'bottom',
-    )
-  }, [settings.data])
-
-  useEffect(() => {
-    setGistToken(settings.data?.gistToken ?? '')
-  }, [settings.data?.gistToken])
 
   const saveSettings = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>

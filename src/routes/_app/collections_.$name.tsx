@@ -8,7 +8,7 @@ import { ValidationHint } from '#/components/shared/validation-hint'
  * 组合订阅编辑器:/collections/:name(UNTITLED 表示新建)。
  * 成员(已保存订阅或远程 URL)+ 节点操作管线。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe, Loader2, Plus, Save, X } from 'lucide-react'
@@ -71,8 +71,11 @@ function CollectionEditorPage() {
   const [tagText, setTagText] = useState('')
   const [urlDraft, setUrlDraft] = useState('')
 
+  const initializedName = useRef<string | null>(null)
+
   useEffect(() => {
-    if (isNew || !existing) return
+    if (isNew || !existing || initializedName.current === name) return
+    initializedName.current = name
     setForm({
       ...existing,
       subscriptions: existing.subscriptions,
@@ -85,7 +88,7 @@ function CollectionEditorPage() {
           ? existing.tag
           : '',
     )
-  }, [isNew, existing])
+  }, [isNew, existing, name])
 
   const patch = (p: Partial<Collection>) =>
     setForm((prev) => ({
@@ -123,6 +126,7 @@ function CollectionEditorPage() {
       return api.patch<Collection>(ApiRoutes.collection(name), payload)
     },
     onSuccess: async (saved) => {
+      setForm({ ...saved, process: saved.process ?? [] })
       await cacheResource(client, 'collection', saved, isNew ? undefined : name)
       toast.success(isNew ? '组合已创建' : '组合已保存')
       void navigate({

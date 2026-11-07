@@ -378,7 +378,9 @@ async function produceArtifact({
 
       await Promise.all(
         subnames.map(async (subname: string) => {
-          const sub = findByName(allSubs, subname)
+          const sub = /^https?:/i.test(subname)
+            ? { name: subname, source: 'remote', url: subname }
+            : findByName(allSubs, subname)
           if (!sub) {
             errors[subname] = new ResourceNotFoundError(
               'SUBSCRIPTION_NOT_FOUND',
@@ -423,7 +425,7 @@ async function produceArtifact({
                         reqUA,
                         undefined,
                         undefined,
-                        undefined,
+                        awaitCustomCache,
                         noCache || collection.noCache || sub.noCache,
                         true,
                         {
@@ -499,9 +501,8 @@ async function produceArtifact({
               {
                 [sub.name]: sub,
                 _collection: collection,
-                $options,
               },
-              undefined,
+              $options,
               currentRaw,
               memberContext,
             )

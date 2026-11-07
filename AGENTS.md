@@ -12,6 +12,7 @@ pnpm build               # 构建
 pnpm deploy              # pnpm run build && wrangler deploy
 pnpm lint                # eslint
 pnpm typecheck           # tsc --noEmit
+pnpm test                # Node 回归测试(内存 SQLite + 实际引擎)
 pnpm format              # prettier --write . && eslint --fix
 pnpm check               # prettier --check .(CI 式校验,不改文件)
 pnpm generate-routes     # tsr generate(仅在路由文件增删后需要)
@@ -29,7 +30,7 @@ wrangler d1 migrations apply suki-sub --local
 wrangler d1 migrations apply suki-sub --remote
 ```
 
-关于测试:仓库目前**没有测试套件**(没有 `scripts/` 目录,`package.json` 里也没有 `test:*` 脚本)。改代码后靠 `pnpm typecheck` + `pnpm lint` + `pnpm check` + 手动跑 `pnpm dev` 验证。
+关于测试:`pnpm test` 运行 `tests/*.test.mjs`，覆盖通知策略、组合排序、请求隔离、备份回滚和接口校验；使用 Node.js 24(含内置 SQLite)，不需要额外数据库或浏览器。改代码后运行 `pnpm typecheck` + `pnpm lint` + `pnpm check` + `pnpm test` + `pnpm build`，交互改动再手动验证。
 
 ## 请求分发与运行时结构
 

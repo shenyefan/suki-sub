@@ -9,7 +9,7 @@ import { ValidationHint } from '#/components/shared/validation-hint'
  * 单条订阅编辑器:/subs/:name(name=UNTITLED 表示新建)。
  * 基础设置(来源/拉取/外观)+ 节点操作管线。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Loader2, Save } from 'lucide-react'
@@ -135,9 +135,11 @@ function SubEditorPage() {
   } | null>(null)
   const [ageOpen, setAgeOpen] = useState(false)
 
+  const initializedName = useRef<string | null>(null)
+
   useEffect(() => {
-    if (isNew) return
-    if (!existing) return
+    if (isNew || !existing || initializedName.current === name) return
+    initializedName.current = name
     setForm({ ...existing, process: existing.process ?? [] })
     setTagText(
       Array.isArray(existing.tag)
@@ -146,7 +148,7 @@ function SubEditorPage() {
           ? existing.tag
           : '',
     )
-  }, [isNew, existing])
+  }, [isNew, existing, name])
 
   const patch = (p: Partial<Subscription>) =>
     setForm((prev) => ({ ...prev, ...p }))
@@ -176,6 +178,7 @@ function SubEditorPage() {
       return api.patch<Subscription>(ApiRoutes.sub(name), payload)
     },
     onSuccess: async (saved) => {
+      setForm({ ...saved, process: saved.process ?? [] })
       await cacheResource(client, 'sub', saved, isNew ? undefined : name)
       toast.success(isNew ? '订阅已创建' : '订阅已保存')
       void navigate({

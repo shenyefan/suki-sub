@@ -23,13 +23,17 @@ import {
   SUBS_KEY,
 } from '../core/constants'
 
-let schemaReady = false
+const schemaReady = new WeakMap<D1Database, Promise<void>>()
 
 async function loadStore(env: Env): Promise<EngineStore> {
-  if (!schemaReady) {
-    await ensureSchema(env.SUKI_SUB_DB)
-    schemaReady = true
+  const db = env.SUKI_SUB_DB
+  let ready = schemaReady.get(db)
+  if (!ready) {
+    ready = ensureSchema(db)
+    schemaReady.set(db, ready)
+    ready.catch(() => schemaReady.delete(db))
   }
+  await ready
   const [subs, collections, modules, settings] = await Promise.all([
     listSubscriptions(env.SUKI_SUB_DB),
     listCollections(env.SUKI_SUB_DB),
@@ -56,10 +60,11 @@ export async function withApiStore<T>(
 ): Promise<T> {
   const store = await loadStore(env)
   let result: T | undefined
+  let dirty = new Set<string>()
   await runWithEngineStore(store, async () => {
     result = await handler()
+    dirty = takeDirtyEngineKeys()
   })
-  const dirty = takeDirtyEngineKeys()
   const db = env.SUKI_SUB_DB
   for (const key of dirty) {
     switch (key) {

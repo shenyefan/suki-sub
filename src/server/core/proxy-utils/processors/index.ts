@@ -271,7 +271,7 @@ function SortOperator(order: string = 'asc'): ProcessorResult {
         case 'asc':
         case 'desc':
           return proxies.sort((a: any, b: any) => {
-            let res = a.name > b.name ? 1 : -1
+            let res = a.name === b.name ? 0 : a.name > b.name ? 1 : -1
             res *= order === 'desc' ? -1 : 1
             return res
           })
@@ -303,13 +303,13 @@ function RegexSortOperator(input: any): ProcessorResult {
         const oB = getRegexOrder(expressions, b.name)
         if (oA && !oB) return -1
         if (oB && !oA) return 1
-        if (oA && oB) return oA < oB ? -1 : 1
+        if (oA && oB) return oA - oB
         if (order === 'original') {
           return 0
         } else if (order === 'desc') {
-          return a.name < b.name ? 1 : -1
+          return a.name === b.name ? 0 : a.name < b.name ? 1 : -1
         } else {
-          return a.name < b.name ? -1 : 1
+          return a.name === b.name ? 0 : a.name < b.name ? -1 : 1
         }
       })
     },

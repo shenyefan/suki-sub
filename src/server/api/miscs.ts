@@ -16,10 +16,7 @@ import {
   listCollections,
   listModules,
   listSubscriptions,
-  replaceAllSettings,
-  replaceCollections,
-  replaceModules,
-  replaceSubscriptions,
+  restoreResources,
 } from '../store/d1'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -124,10 +121,12 @@ app.post('/api/backup', async (c) =>
         },
       )
       const db = c.env.SUKI_SUB_DB
-      await replaceSubscriptions(db, data.subs ?? [])
-      await replaceCollections(db, data.collections ?? [])
-      await replaceModules(db, data.modules ?? [])
-      if (data.settings != null) await replaceAllSettings(db, settings)
+      await restoreResources(db, {
+        subs: data.subs ?? [],
+        collections: data.collections ?? [],
+        modules: data.modules ?? [],
+        ...(data.settings != null ? { settings } : {}),
+      })
       return c.json({ restored: true })
     } catch (err) {
       return errorResponse(c, err)

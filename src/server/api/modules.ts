@@ -15,9 +15,17 @@ import { RequestInvalidError, ResourceNotFoundError } from '../core/errors'
 
 const app = new Hono<{ Bindings: Env }>()
 
-function assertValidName(name: string) {
-  if (!name || /\//.test(name))
-    throw new RequestInvalidError('INVALID_NAME', `name ${name} is invalid`)
+function assertValidName(name: unknown): asserts name is string {
+  if (typeof name !== 'string' || !name.trim() || name.includes('/'))
+    throw new RequestInvalidError(
+      'INVALID_NAME',
+      '模块名称不能为空且不能包含 /',
+    )
+}
+
+function assertValidContent(content: unknown): asserts content is string {
+  if (typeof content !== 'string')
+    throw new RequestInvalidError('INVALID_CONTENT', '模块内容必须是字符串')
 }
 
 // --- modules ---
@@ -37,6 +45,7 @@ app.post('/api/modules', async (c) =>
     try {
       const m = await c.req.json()
       assertValidName(m.name)
+      assertValidContent(m.content)
       if (await getModule(c.env.SUKI_SUB_DB, m.name)) {
         throw new RequestInvalidError(
           'DUPLICATE_KEY',
@@ -83,6 +92,13 @@ app.patch('/api/modules/:name', async (c) =>
         ...patch,
         name: patch.name ?? old.name,
       }
+      assertValidName(merged.name)
+      assertValidContent(merged.content)
+      if (
+        merged.name !== name &&
+        (await getModule(c.env.SUKI_SUB_DB, merged.name))
+      )
+        throw new RequestInvalidError('DUPLICATE_KEY', '模块名称已存在')
       await updateModuleRow(c.env.SUKI_SUB_DB, name, merged, merged.name)
       return c.json(merged)
     } catch (err) {

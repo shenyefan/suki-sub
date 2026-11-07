@@ -621,6 +621,13 @@ export async function replaceAllSettings(
   db: D1Database,
   settings: Settings,
 ): Promise<void> {
+  await db.batch(settingsStatements(db, settings))
+}
+
+function settingsStatements(
+  db: D1Database,
+  settings: Settings,
+): D1PreparedStatement[] {
   const stmts = [db.prepare('DELETE FROM settings')]
   for (const [k, v] of Object.entries(settings))
     stmts.push(
@@ -628,7 +635,7 @@ export async function replaceAllSettings(
         .prepare('INSERT INTO settings(key, value) VALUES(?1,?2)')
         .bind(k, JSON.stringify(v)),
     )
-  await db.batch(stmts)
+  return stmts
 }
 
 // ---------------------------------------------------------------------------
@@ -674,6 +681,13 @@ export async function replaceSubscriptions(
   db: D1Database,
   subs: Subscription[],
 ): Promise<void> {
+  await db.batch(subscriptionStatements(db, subs))
+}
+
+function subscriptionStatements(
+  db: D1Database,
+  subs: Subscription[],
+): D1PreparedStatement[] {
   const stmts = [db.prepare('DELETE FROM subscriptions')]
   subs.forEach((sub, i) => {
     const r = subToRow(sub.name, sub)
@@ -694,13 +708,20 @@ export async function replaceSubscriptions(
         ),
     )
   })
-  await db.batch(stmts)
+  return stmts
 }
 
 export async function replaceCollections(
   db: D1Database,
   cols: Collection[],
 ): Promise<void> {
+  await db.batch(collectionStatements(db, cols))
+}
+
+function collectionStatements(
+  db: D1Database,
+  cols: Collection[],
+): D1PreparedStatement[] {
   const stmts = [db.prepare('DELETE FROM collections')]
   const sourceStmts: D1PreparedStatement[] = []
   for (let i = 0; i < cols.length; i++) {
@@ -731,13 +752,20 @@ export async function replaceCollections(
     })
   }
   stmts.push(db.prepare('DELETE FROM collection_sources'))
-  await db.batch([...stmts, ...sourceStmts])
+  return [...stmts, ...sourceStmts]
 }
 
 export async function replaceModules(
   db: D1Database,
   modules: ModuleItem[],
 ): Promise<void> {
+  await db.batch(moduleStatements(db, modules))
+}
+
+function moduleStatements(
+  db: D1Database,
+  modules: ModuleItem[],
+): D1PreparedStatement[] {
   const stmts = [db.prepare('DELETE FROM modules')]
   for (const [i, m] of modules.entries()) {
     const { extra } = splitObject('module', m)
@@ -755,7 +783,7 @@ export async function replaceModules(
         ),
     )
   }
-  await db.batch(stmts)
+  return stmts
 }
 
 export const TABLE_FOR = {
@@ -763,3 +791,21 @@ export const TABLE_FOR = {
   collections: 'collections',
   modules: 'modules',
 } as const
+
+/** 恢复数据一次提交；任意资源写入失败时整批回滚，避免留下半份备份。 */
+export async function restoreResources(
+  db: D1Database,
+  data: {
+    subs: Subscription[]
+    collections: Collection[]
+    modules: ModuleItem[]
+    settings?: Settings
+  },
+): Promise<void> {
+  await db.batch([
+    ...subscriptionStatements(db, data.subs),
+    ...collectionStatements(db, data.collections),
+    ...moduleStatements(db, data.modules),
+    ...(data.settings ? settingsStatements(db, data.settings) : []),
+  ])
+}

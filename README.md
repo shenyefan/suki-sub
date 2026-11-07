@@ -64,6 +64,14 @@ pnpm dev                            # http://localhost:3000(vite 插件提供本
 
 操作符使用统一类型名(如 `Script Operator`、`Flag Operator`),脚本内容放在 `item.args.content`。
 
+## 自动依赖更新与校验
+
+`.github/dependabot.yml` 配置 GitHub Dependabot，每周一北京时间 09:00 检查 pnpm 依赖和 GitHub Actions，自动创建更新 PR。TanStack、React 相关包分别成组，其余 minor/patch 更新合并成组，其他 major 更新独立提交；npm 依赖最多同时打开 5 个版本更新 PR。
+
+配置推送到 GitHub 默认分支后生效，无需额外机器人 Token。PR 由人工审核合并；安全告警及安全更新需在仓库 Settings → Advanced Security 中单独开启。
+
+`.github/workflows/ci.yml` 在 push、PR 和手动触发时使用 Node.js 24 与 `package.json` 声明的 pnpm 版本，按锁文件安装，运行类型、lint、格式、回归测试和生产构建，无需 OIDC 或 Cloudflare 凭据。`pnpm test` 使用内存 SQLite 和实际引擎，不访问真实订阅服务。
+
 ## 部署
 
 D1 与 KV 绑定统一使用 `SUKI_SUB_DB`、`SUKI_SUB_CACHE`，部署环境需使用相同名称。已有资源可继续绑定原来的资源 ID。脚本运行环境注入 `$sukiSub`；自定义脚本应使用这个名称。缓存键与分享加密请求头统一使用 `suki-sub` 前缀。

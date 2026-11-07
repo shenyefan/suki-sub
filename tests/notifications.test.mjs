@@ -505,7 +505,12 @@ test('发送失败落日志并显示摘要，不通过通知再次转发', async
         request(),
       ),
     )
-    const logs = await listServerLogs(db)
+    const { logs } = await listServerLogs(db, {
+      action: 'all',
+      userId: '',
+      requestId: '',
+      outcome: 'all',
+    })
     assert.equal(logs[0].details.action, 'notification.telegram')
     assert.doesNotMatch(JSON.stringify(logs), /FAKE_TOKEN/)
   } finally {

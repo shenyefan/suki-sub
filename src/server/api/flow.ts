@@ -2,12 +2,12 @@
  * 流量信息与 age 密钥工具。
  */
 import { Hono } from 'hono'
-import { isLinkFlagEnabled, parseResourceLink } from '#/shared/resource-link'
+import { isLinkFlagEnabled } from '#/shared/resource-link'
 import { errorResponse } from './http'
 import { withApiStore } from '../store/bootstrap'
 import { getSubscription, getCollection } from '../store/d1'
-import { collectionFlow } from './download-flow'
-import { getFlowHeaders, parseFlowHeaders } from '../core/utils/flow'
+import { collectionFlow, subscriptionFlow } from './download-flow'
+import { parseFlowHeaders } from '../core/utils/flow'
 import {
   AGE_PUBLIC_KEY,
   AGE_SECRET_KEY,
@@ -38,77 +38,13 @@ app.get('/api/subs/:name/flow', async (c) =>
           `Subscription ${name}: noFlow`,
         )
       }
-      if (
-        sub.source === 'local' &&
-        !['localFirst', 'remoteFirst'].includes(sub.mergeSources ?? '')
-      ) {
-        if (!sub.subUserinfo)
-          throw new RequestInvalidError(
-            'NO_FLOW_INFO',
-            `Local subscription ${name} has no flow information!`,
-          )
-        let subUserInfo: string | undefined
-        if (/^https?:\/\//.test(sub.subUserinfo)) {
-          subUserInfo = await getFlowHeaders(
-            sub.subUserinfo,
-            undefined,
-            undefined,
-            sub.subUserinfo,
-            undefined,
-            noCache,
-          )
-        } else {
-          subUserInfo = sub.subUserinfo
-        }
-        return c.json(parseFlowHeaders(subUserInfo))
-      }
-      const firstUrl =
-        (urlArg || sub.url || '')
-          .split(/[\r\n]+/)
-          .map((i) => i.trim())
-          .filter((i) => i.length)[0] ?? ''
-      if (!/^https?/.test(firstUrl))
-        throw new RequestInvalidError(
-          'NO_FLOW_INFO',
-          `Subscription ${name}: noFlow`,
-        )
-      const flowArgs = parseResourceLink(firstUrl).arguments
-      let flowHeaders: string | undefined
-      try {
-        flowHeaders = await getFlowHeaders(
-          firstUrl,
-          flowArgs.flowUserAgent || sub.ua,
-          undefined,
-          flowArgs.flowUrl,
-          flowArgs.flowHeaders,
-          noCache,
-        )
-      } catch (err) {
-        // 订阅地址不可达时回落到 subUserinfo
-        flowHeaders = undefined
-        if (!sub.subUserinfo) throw err
-      }
-      if (!flowHeaders && !sub.subUserinfo)
-        throw new RequestInvalidError(
-          'NO_FLOW_INFO',
-          'Failed to fetch flow headers',
-        )
-      let subUserInfo: string | undefined
-      if (sub.subUserinfo && /^https?:\/\//.test(sub.subUserinfo)) {
-        subUserInfo = await getFlowHeaders(
-          sub.subUserinfo,
-          undefined,
-          undefined,
-          sub.subUserinfo,
-          undefined,
-          noCache,
-        )
-      } else if (sub.subUserinfo) {
-        subUserInfo = sub.subUserinfo
-      }
-      const result = parseFlowHeaders(
-        [subUserInfo, flowHeaders].filter((i) => i).join('; '),
+      const value = await subscriptionFlow(
+        urlArg ? { ...sub, url: urlArg } : sub,
+        noCache,
       )
+      if (!value)
+        throw new RequestInvalidError('NO_FLOW_INFO', '所选来源没有流量信息')
+      const result = parseFlowHeaders(value)
       return c.json(result)
     } catch (err) {
       return errorResponse(c, err)

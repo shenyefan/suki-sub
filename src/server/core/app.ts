@@ -3,6 +3,7 @@ import { writeServerLog } from '../store/logs'
  * `$` 引擎上下文:日志 + 对 EngineStore 快照的同步 read/write/delete。
  */
 import { getEngineStore } from '../store/engine-store'
+import type { EngineStore } from '../store/engine-store'
 import type {
   Collection,
   ModuleItem,
@@ -23,16 +24,20 @@ type StoreKey =
   | typeof SETTINGS_KEY
 
 /** 引擎写过的键(bootstrap 在请求结束时据此回写 D1) */
-const dirtyKeys = new Set<string>()
+const dirtyKeys = new WeakMap<EngineStore, Set<string>>()
 
 export function takeDirtyEngineKeys(): Set<string> {
-  const keys = new Set(dirtyKeys)
-  dirtyKeys.clear()
+  const store = getEngineStore()
+  const keys = dirtyKeys.get(store) ?? new Set<string>()
+  dirtyKeys.delete(store)
   return keys
 }
 
 function markDirty(key: string): void {
-  dirtyKeys.add(key)
+  const store = getEngineStore()
+  const keys = dirtyKeys.get(store) ?? new Set<string>()
+  keys.add(key)
+  dirtyKeys.set(store, keys)
 }
 
 function readKey(key: string): unknown {
@@ -120,6 +125,7 @@ const $ = {
       default:
         throw new Error(`$.delete: unsupported key ${key} on Workers`)
     }
+    markDirty(key)
   },
 }
 
