@@ -8,6 +8,12 @@
 - 定时任务:Workers Cron Triggers(Gist 自动备份)
 - 脚本操作符:官方 [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/)(`worker_loaders`)沙箱执行用户脚本 —— **需要 Workers 付费计划**
 
+## Sub-Store 参考版本
+
+订阅处理引擎参考 [Sub-Store](https://github.com/sub-store-org/Sub-Store)，并以 TypeScript 移植、适配 Cloudflare Workers。当前参照版本为 **Sub-Store 2.44.5**，对应提交 [`526e83ed964c34dc157acbdcdade3991eede7084`](https://github.com/sub-store-org/Sub-Store/commit/526e83ed964c34dc157acbdcdade3991eede7084)，核对日期为 **2026-11-07**。
+
+该版本是按功能核对和同步的参考基准，不代表与上游全量一致；运行时使用本仓库引擎，不会自动拉取上游脚本。新增功能、适配范围和验证结果见 [Sub-Store 同步记录](docs/upstream-sync-2026-11-07.md)。
+
 ## 架构
 
 ```
@@ -71,6 +77,12 @@ pnpm dev                            # http://localhost:3000(vite 插件提供本
 配置推送到 GitHub 默认分支后生效，无需额外机器人 Token。PR 由人工审核合并；安全告警及安全更新需在仓库 Settings → Advanced Security 中单独开启。
 
 `.github/workflows/ci.yml` 在 push、PR 和手动触发时使用 Node.js 24 与 `package.json` 声明的 pnpm 版本，按锁文件安装，运行类型、lint、格式、回归测试和生产构建，无需 OIDC 或 Cloudflare 凭据。`pnpm test` 使用内存 SQLite 和实际引擎，不访问真实订阅服务。
+
+### Cloudflare 分支构建
+
+依赖更新 PR 使用 GitHub Actions 校验，合并到生产分支后再由 Cloudflare 部署。若不需要为每个 PR 创建在线预览，可在 Worker 的 **Settings → Build → Branch control** 关闭 **Enable Preview Builds**；生产分支保留构建命令 `pnpm run build`、部署命令 `pnpm exec wrangler deploy`。
+
+若日志显示构建成功，随后 `wrangler preview` 报 `missing a previews block`，原因是分支预览缺少独立配置，并非依赖安装或应用构建失败。本仓库尚未配置预览 D1、KV、脚本沙箱绑定和 OIDC secrets；需要在线预览时，应先按 [Worker Previews 文档](https://developers.cloudflare.com/workers/previews/get-started/) 配置这些资源。`preview_urls: false` 不等同于关闭 Workers Builds 的分支构建。预览命令与生产部署命令应分别配置，不能把依赖 PR 的预览命令改成生产部署。
 
 ## 部署
 

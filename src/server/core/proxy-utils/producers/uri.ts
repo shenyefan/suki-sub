@@ -1094,7 +1094,9 @@ export default function URI_Producer(): Producer {
             }
             if (vmessTransportHost) {
               result.host = Array.isArray(vmessTransportHost)
-                ? vmessTransportHost[0]
+                ? proxy.network === 'h2'
+                  ? vmessTransportHost.join(',')
+                  : vmessTransportHost[0]
                 : vmessTransportHost
             }
           }
@@ -1217,7 +1219,7 @@ export default function URI_Producer(): Producer {
             trojanMode = `&mode=${encodeURIComponent(proxy._mode)}`
           }
         }
-        result = `trojan://${proxy.password}@${proxy.server}:${
+        result = `trojan://${encodeURIComponent(proxy.password)}@${proxy.server}:${
           proxy.port
         }?sni=${encodeURIComponent(proxy.sni || proxy.server)}${
           proxy['skip-cert-verify'] ? '&allowInsecure=1' : ''
@@ -1378,7 +1380,7 @@ export default function URI_Producer(): Producer {
       case 'anytls': {
         result = vless({
           ...proxy,
-          uuid: proxy.password,
+          uuid: encodeURIComponent(proxy.password),
           network: proxy.network || 'tcp',
         }).replace('vless', 'anytls')
         // 偷个懒

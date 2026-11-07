@@ -1964,7 +1964,6 @@ function URI_AnyTLS() {
     let password = passwordRaw
     let port = portRaw
     let proxyName = nameRaw
-    password = decodeURIComponent(password)
     port = parseInt(`${port}`, 10)
     if (isNaN(port)) {
       port = 443
@@ -2361,12 +2360,14 @@ function URI_Trojan() {
   }
 
   const parse = (line: any) => {
-    const matched = /^(trojan:\/\/.*?@.*?)(:(\d+))?\/?(\?.*?)?$/.exec(line)!
+    // 先分离名称，避免缺少查询参数时把默认端口追加到名称末尾。
+    const [sourceLine, fragment] = line.split(/#(.+)/, 2)
+    let newLine = sourceLine
+    const matched = /^(trojan:\/\/.*?@.*?)(:(\d+))?\/?(\?.*?)?$/.exec(newLine)!
     const port = matched[2]
     if (!port) {
-      line = line.replace(matched[1], `${matched[1]}:443`)
+      newLine = newLine.replace(matched[1], `${matched[1]}:443`)
     }
-    const [newLine, fragment] = line.split(/#(.+)/, 2)
     const parser = getTrojanURIParser()
     const proxy = parser.parse(newLine)
     if (isNotBlank(fragment)) {

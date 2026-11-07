@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import {
   getWireGuardAddressWithCIDR,
   isPresent,
@@ -87,10 +88,7 @@ export default function ClashMeta_Producer(): Producer {
         }
         if (!supportsShadowsocksV2rayPluginMode(proxy, ['websocket'])) {
           return false
-        } else if (
-          proxy.type === 'snell' &&
-          !isSupportedMihomoVersion(proxy.version, [1, 2, 3, 4, 5])
-        ) {
+        } else if (proxy.type === 'snell' && !supportsMihomoSnell(proxy)) {
           return false
         } else if (
           hasMihomoShadowTls(proxy) &&
@@ -235,8 +233,6 @@ export default function ClashMeta_Producer(): Producer {
           proxy['pre-shared-key'] = proxy['preshared-key']
           proxy.ip = getWireGuardAddressWithCIDR(proxy, 'ipv4')
           proxy.ipv6 = getWireGuardAddressWithCIDR(proxy, 'ipv6')
-        } else if (proxy.type === 'snell' && proxy.version < 3) {
-          delete proxy.udp
         } else if (proxy.type === 'vless') {
           if (isPresent(proxy, 'sni')) {
             proxy.servername = proxy.sni
@@ -285,16 +281,16 @@ export default function ClashMeta_Producer(): Producer {
         }
 
         if (proxy.type === 'snell') {
+          const version = Number(proxy.version ?? 1)
+          if (proxy.version != null && Number.isInteger(version))
+            proxy.version = version
+          if (version < 3) delete proxy.udp
+          if (version < 6) delete proxy.mode
           const shadowTLSOpts = getMihomoShadowTlsOpts(proxy)
           if (shadowTLSOpts) {
             proxy['obfs-opts'] = {
+              ...shadowTLSOpts,
               mode: 'shadow-tls',
-              host: shadowTLSOpts.host,
-              password: shadowTLSOpts.password,
-              version: shadowTLSOpts.version,
-            }
-            if (shadowTLSOpts.alpn) {
-              proxy['obfs-opts'].alpn = shadowTLSOpts.alpn
             }
             delete proxy.plugin
             delete proxy['plugin-opts']
@@ -442,6 +438,32 @@ function isSupportedMihomoVersion(version: any, supportedVersions: number[]) {
 
   const parsed = Number(normalized)
   return Number.isInteger(parsed) && supportedVersions.includes(parsed)
+}
+
+function supportsMihomoSnell(proxy: any) {
+  if (!isSupportedMihomoVersion(proxy.version, [0, 1, 2, 3, 4, 5, 6]))
+    return false
+  const isV6 = Number(proxy.version) === 6
+  const { psk, mode, 'obfs-opts': obfsOpts } = proxy
+  const obfsModes = ['', 'shadow-tls', 'restls', 'jls']
+  if (!isV6) obfsModes.push('http', 'tls')
+  let reason
+  if (typeof psk !== 'string' && !Number.isFinite(psk))
+    reason = '缺少有效的 PSK'
+  else if (obfsOpts != null && !isPlainObject(obfsOpts))
+    reason = 'obfs-opts 必须是对象'
+  else if (!obfsModes.includes(obfsOpts?.mode ?? ''))
+    reason = '不支持的混淆模式'
+  else if (isV6) {
+    const length = Buffer.byteLength(String(psk), 'utf8')
+    if (length < 12 || length > 255)
+      reason = 'PSK 必须为 12 到 255 个 UTF-8 字节'
+    else if (!['', 'default', 'unshaped', 'unsafe-raw'].includes(mode ?? ''))
+      reason = '不支持的 Snell v6 模式'
+  }
+  if (!reason) return true
+  $.error(`Mihomo Snell 节点 ${proxy.name} 已被过滤：${reason}`)
+  return false
 }
 
 function hasMihomoShadowTls(proxy: any) {

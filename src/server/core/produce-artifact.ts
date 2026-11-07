@@ -105,6 +105,7 @@ async function produceArtifact({
   noCache,
   noFlow,
   validation = false,
+  includeRaw = false,
 }: any) {
   platform = platform || 'JSON'
 
@@ -134,9 +135,13 @@ async function produceArtifact({
     const requestUA = sub.passThroughUA ? ua : sub.ua || ua
     const skipFlow = noFlow || sub.noFlow
 
+    let sourceRaw: any = []
+    const withRaw = (result: any) =>
+      includeRaw
+        ? { result, raw: Array.isArray(sourceRaw) ? sourceRaw : [sourceRaw] }
+        : result
     try {
       let raw
-      let sourceRaw
       if (content && !['localFirst', 'remoteFirst'].includes(mergeSources)) {
         raw = content
         sourceRaw = content
@@ -248,7 +253,9 @@ async function produceArtifact({
         }
       }
       if (produceType === 'raw') {
-        return JSON.stringify((Array.isArray(raw) ? raw : [raw]).flat())
+        return withRaw(
+          JSON.stringify((Array.isArray(raw) ? raw : [raw]).flat()),
+        )
       }
       // parse proxies
       let proxies = (Array.isArray(raw) ? raw : [raw])
@@ -307,10 +314,15 @@ async function produceArtifact({
         produceType,
         produceOpts,
       )
-      return executionContext.configTemplates.length &&
-        produceType !== 'internal'
-        ? applyConfigTemplates(output, executionContext.configTemplates)
-        : output
+      return withRaw(
+        executionContext.configTemplates.length && produceType !== 'internal'
+          ? applyConfigTemplates(
+              output,
+              executionContext.configTemplates,
+              platform,
+            )
+          : output,
+      )
     } catch (err: any) {
       if (!shouldFallbackIgnoreFailedRemoteSub(subIgnoreFailedRemoteSub)) {
         if (err instanceof BaseError)
@@ -331,11 +343,13 @@ async function produceArtifact({
       })
       $.warn(`订阅 ${sub.name} 启用兜底后返回空结果: ${err.message ?? err}`)
 
-      return buildEmptySubscriptionOutput({
-        platform,
-        produceType,
-        produceOpts,
-      })
+      return withRaw(
+        buildEmptySubscriptionOutput({
+          platform,
+          produceType,
+          produceOpts,
+        }),
+      )
     }
   } else if (['collection', 'col'].includes(type)) {
     const allSubs: any = $.read(SUBS_KEY)
@@ -367,10 +381,12 @@ async function produceArtifact({
     )
     const skipFlow = noFlow || collection.noFlow
 
+    const rawResults: any = {}
+    const withRaw = (result: any) =>
+      includeRaw ? { result, raw: rawResults } : result
     try {
       const results: any = {}
       const errors: any = {}
-      const rawResults: any = {}
       const memberTemplates: Partial<
         Record<string, Record<string, unknown>[]>
       > = {}
@@ -647,10 +663,15 @@ async function produceArtifact({
         produceType,
         produceOpts,
       )
-      return executionContext.configTemplates.length &&
-        produceType !== 'internal'
-        ? applyConfigTemplates(output, executionContext.configTemplates)
-        : output
+      return withRaw(
+        executionContext.configTemplates.length && produceType !== 'internal'
+          ? applyConfigTemplates(
+              output,
+              executionContext.configTemplates,
+              platform,
+            )
+          : output,
+      )
     } catch (err: any) {
       if (
         !shouldFallbackIgnoreFailedRemoteSub(collectionIgnoreFailedRemoteSub)
@@ -677,11 +698,13 @@ async function produceArtifact({
         }`,
       )
 
-      return buildEmptySubscriptionOutput({
-        platform,
-        produceType,
-        produceOpts,
-      })
+      return withRaw(
+        buildEmptySubscriptionOutput({
+          platform,
+          produceType,
+          produceOpts,
+        }),
+      )
     }
   } else if (type === 'rule') {
     const allRules: any = $.read(RULES_KEY as any)

@@ -78,9 +78,10 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 ### 当前核对基准
 
-- 核对日期：2026-10-11。
-- 上游分支：`master`；GitHub API 实时读取的 HEAD 为 [`a3e61061e50b40e5c5938969aab915d05d8d7069`](https://github.com/sub-store-org/Sub-Store/commit/a3e61061e50b40e5c5938969aab915d05d8d7069)，提交日期 2026-10-06，版本 `2.42.3`。
-- **这是核对基准，不是已全量同步基线。** 本地没有可靠的原始移植 SHA 记录，本次按功能同步下表 5 项并校验；未对整个上游仓库做全量替换，不能把当前引擎标记为完整移植了这个 commit。
+- 核对日期：2026-11-07。
+- 上游分支：`master`；GitHub API 实时读取的 HEAD 为 [`526e83ed964c34dc157acbdcdade3991eede7084`](https://github.com/sub-store-org/Sub-Store/commit/526e83ed964c34dc157acbdcdade3991eede7084)，提交日期 2026-11-06，版本 `2.44.5`。
+- 上次基准为 `a3e61061e50b40e5c5938969aab915d05d8d7069`（`2.42.3`）；本次逐项核对其后的 26 个提交，已移植适用的引擎增量；完整清单、已有能力和不适用项见 [本次同步记录](docs/upstream-sync-2026-11-07.md)。
+- **这是核对基准，不是已全量同步基线。** 本地没有可靠的原始移植 SHA 记录，未对整个上游仓库做全量替换，不能把当前引擎标记为完整移植了这个 commit。
 - 2026-10-11 已同步下表 5 项引擎更新，使用实际 `ProxyUtils` 的解析、产出和往返样例校验。以后新增同步后，应更新模块状态和已同步 commit，不要仅因下载了最新源码就推进同步记录。
 
 ### 源文件对应关系
@@ -104,7 +105,7 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 上游 [Loon 资源解析器脚本](https://github.com/sub-store-org/Sub-Store/blob/master/backend/src/products/resource-parser.loon.js) 是给 Loon 客户端执行的入口，引用同一套 `ProxyUtils` / `RuleUtils`。本项目没有直接部署这个脚本，而是在 Workers 中移植上述核心源码。上游 `backend/src/products/proxy-utils.esm.js` 也只是导出 `ProxyUtils.parse/produce` 的入口，不是本项目应直接覆盖的解析器。`scripts/demo.js` 是上游演示脚本，不是生产引擎。
 
-### 本次已同步的上游更新
+### 2026-10-11 已同步的上游更新
 
 | 上游 commit | 更新 | 本地核对结果与同步位置 |
 | --- | --- | --- |
@@ -116,7 +117,7 @@ KV(`store/kv.ts`)只放远程订阅缓存(`#suki-sub-cached-resource:*`,默认 T
 
 已具备的近期能力：Loon `server-dns`（`8c2a695663b2`）、Loon `chrome147`（`07d94ef9e197`）、VLESS URI `finalmask`（`18dfe4c07287`）。这不代表整个对应模块与最新上游一致。
 
-规则集目录最近的上游提交仍为 `65c0b83982310f39257af53f4ed4608270ba19e4`（2024-03-15）。核对最新 HEAD 后，解析、预处理和产出逻辑没有待同步更新；本地主要差别是类型、日志和 QX 输出标识 `SUKI-SUB`。节点脚本操作符的最近上游提交为 `2700c8ca5054`（2026-08-02，`noFlow` 上下文），输入预处理器最近提交为 `87c43fed361c`（2026-07-11）；它们不在此次最近几次提交的变更范围内。
+规则集目录最近一次核对记录为 `65c0b83982310f39257af53f4ed4608270ba19e4`（2024-03-15）；节点脚本操作符记录为 `2700c8ca5054`（2026-08-02，`noFlow` 上下文），输入预处理器记录为 `87c43fed361c`（2026-07-11）。2026-11-07 核对的 26 个提交未修改这些模块；本地规则集仍保留类型、日志和 QX 输出标识 `SUKI-SUB` 的差别。
 
 ### 后续同步步骤
 
