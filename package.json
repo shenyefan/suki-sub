@@ -82,7 +82,7 @@
     "@types/culori": "^4.0.1",
     "@types/dns-packet": "^5.6.5",
     "@types/lodash": "^4.17.25",
-    "@types/node": "^22.10.2",
+    "@types/node": "^26.6.6",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
