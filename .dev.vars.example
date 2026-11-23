@@ -1,6 +1,6 @@
 # 本地开发环境变量模板:复制为 .dev.vars 并填入实际值
 # OIDC 管理接口与登录流鉴权(必填,否则 /api/* 返回 503)
-OIDC_ISSUER=https://auth.syf.sh
+OIDC_ISSUER=https://auth.suki.icu/api/auth
 OIDC_AUDIENCE=your-client-id
 # 机密客户端的 client secret;公共客户端(PKCE)留空或省略
 OIDC_CLIENT_SECRET=
